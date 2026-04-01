@@ -1,11 +1,9 @@
 import { Request, Response } from "express";
 import { prisma } from "../lib/prisma";
 
-// Helper: rango del día completo en UTC ajustado a Colombia (UTC-5)
 const getColombiaDayRange = () => {
   const now = new Date()
   const colombiaOffset = -5 * 60 * 60 * 1000
-
   const nowColombia = new Date(now.getTime() + colombiaOffset)
   const startOfDayColombia = new Date(
     Date.UTC(
@@ -15,18 +13,14 @@ const getColombiaDayRange = () => {
       0, 0, 0, 0
     )
   )
-
   const today = new Date(startOfDayColombia.getTime() - colombiaOffset)
   const tomorrow = new Date(today.getTime() + 24 * 60 * 60 * 1000)
-
   return { today, tomorrow }
 }
 
-// POST /api/daily-summary/close
 export const closeDay = async (req: Request, res: Response) => {
   try {
     const restaurantId = req.body.restaurantId as string
-
     const { today, tomorrow } = getColombiaDayRange()
 
     const orders = await prisma.order.findMany({
@@ -36,40 +30,55 @@ export const closeDay = async (req: Request, res: Response) => {
         createdAt: { gte: today, lt: tomorrow },
       },
       include: { items: true },
-    });
+    })
 
     if (orders.length === 0) {
-      return res.status(400).json({ message: "No hay órdenes del día para cerrar." });
+      return res.status(400).json({ message: "No hay órdenes del día para cerrar." })
     }
 
-    const totalIngresos = orders.reduce((sum, o) => sum + o.total, 0);
-    const totalOrdenes = orders.length;
-    const totalPlatos = orders.reduce(
-      (sum, o) => sum + o.items.reduce((s, i) => s + i.quantity, 0),
-      0
-    );
+    const totalPropinas = orders.reduce((sum, o) => sum + (o.tip ?? 0), 0)
+    const totalIngresos = orders.reduce((sum, o) => sum + o.total + (o.tip ?? 0), 0)
+    const totalOrdenes  = orders.length
+    const totalPlatos   = orders.reduce((sum, o) => sum + o.items.reduce((s, i) => s + i.quantity, 0), 0)
+
     const efectivo = orders
       .filter((o) => o.paymentMethod === "Efectivo")
-      .reduce((sum, o) => sum + o.total, 0);
+      .reduce((sum, o) => sum + o.total + (o.tip ?? 0), 0)
     const datafono = orders
       .filter((o) => o.paymentMethod === "Datafono")
-      .reduce((sum, o) => sum + o.total, 0);
+      .reduce((sum, o) => sum + o.total + (o.tip ?? 0), 0)
     const nequi = orders
       .filter((o) => o.paymentMethod === "Nequi")
-      .reduce((sum, o) => sum + o.total, 0);
+      .reduce((sum, o) => sum + o.total + (o.tip ?? 0), 0)
 
-    const summary = await prisma.dailySummary.create({
-      data: {
+    const summary = await prisma.dailySummary.upsert({
+      where: {
+        restaurantId_date: {
+          restaurantId,
+          date: today,
+        },
+      },
+      update: {
+        totalIngresos:  { increment: totalIngresos },
+        totalOrdenes:   { increment: totalOrdenes },
+        totalPlatos:    { increment: totalPlatos },
+        totalPropinas:  { increment: totalPropinas },
+        efectivo:       { increment: efectivo },
+        datafono:       { increment: datafono },
+        nequi:          { increment: nequi },
+      },
+      create: {
         date: today,
+        restaurantId,
         totalIngresos,
         totalOrdenes,
         totalPlatos,
+        totalPropinas,
         efectivo,
         datafono,
         nequi,
-        restaurantId,
       },
-    });
+    })
 
     await prisma.order.updateMany({
       where: {
@@ -80,50 +89,42 @@ export const closeDay = async (req: Request, res: Response) => {
       data: { status: "ARCHIVADA" },
     })
 
-    return res.status(201).json({ message: "Día cerrado correctamente.", summary });
+    return res.status(201).json({ message: "Día cerrado correctamente.", summary })
   } catch (error) {
-    console.error(error);
-    return res.status(500).json({ message: "Error al cerrar el día." });
+    console.error(error)
+    return res.status(500).json({ message: "Error al cerrar el día." })
   }
-};
+}
 
-// GET /api/daily-summary/:restaurantId
 export const getDailySummaries = async (req: Request, res: Response) => {
   try {
     const restaurantId = req.params.restaurantId as string
-
     const summaries = await prisma.dailySummary.findMany({
       where: { restaurantId },
       orderBy: { date: "desc" },
-    });
-
-    return res.status(200).json(summaries);
+    })
+    return res.status(200).json(summaries)
   } catch (error) {
-    console.error(error);
-    return res.status(500).json({ message: "Error al obtener los resúmenes." });
+    console.error(error)
+    return res.status(500).json({ message: "Error al obtener los resúmenes." })
   }
-};
+}
 
-// DELETE /api/daily-summary/:restaurantId
 export const clearSummaries = async (req: Request, res: Response) => {
   try {
     const restaurantId = req.params.restaurantId as string
-
-    await prisma.dailySummary.deleteMany({ where: { restaurantId } });
-
-    return res.status(200).json({ message: "Resúmenes eliminados correctamente." });
+    await prisma.dailySummary.deleteMany({ where: { restaurantId } })
+    return res.status(200).json({ message: "Resúmenes eliminados correctamente." })
   } catch (error) {
-    console.error(error);
-    return res.status(500).json({ message: "Error al limpiar los resúmenes." });
+    console.error(error)
+    return res.status(500).json({ message: "Error al limpiar los resúmenes." })
   }
-};
+}
 
-// GET /api/daily-summary/chart/:restaurantId
 export const getSummaryChart = async (req: Request, res: Response) => {
   try {
     const restaurantId = req.params.restaurantId as string
     const period = (req.query.period as string) || "week"
-
     const { today: startDate } = getColombiaDayRange()
 
     if (period === "month") {
@@ -133,28 +134,24 @@ export const getSummaryChart = async (req: Request, res: Response) => {
     }
 
     const summaries = await prisma.dailySummary.findMany({
-      where: {
-        restaurantId,
-        date: { gte: startDate },
-      },
+      where: { restaurantId, date: { gte: startDate } },
       orderBy: { date: "asc" },
     })
 
     const data = summaries.map((item) => {
-      const iso = item.date.toISOString()   // "2026-03-31T05:00:00.000Z"
-      const slice = iso.slice(0, 10)        // "2026-03-31"
+      const iso   = item.date.toISOString()
+      const slice = iso.slice(0, 10)
       const [year, month, day] = slice.split("-")
-      const formattedDay = `${day}/${month}` // "31/03"
-
       return {
-        date: slice,
-        day: formattedDay,
-        pedidos: item.totalOrdenes,
-        ingresos: item.totalIngresos,
-        platos: item.totalPlatos,
-        efectivo: item.efectivo,
-        datafono: item.datafono,
-        nequi: item.nequi,
+        date:      slice,
+        day:       `${day}/${month}`,
+        pedidos:   item.totalOrdenes,
+        ingresos:  item.totalIngresos,
+        platos:    item.totalPlatos,
+        propinas:  item.totalPropinas ?? 0,
+        efectivo:  item.efectivo,
+        datafono:  item.datafono,
+        nequi:     item.nequi,
       }
     })
 

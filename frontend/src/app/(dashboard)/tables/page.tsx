@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { UtensilsCrossed, Plus, Trash2, X, ShoppingBag, CheckCircle } from "lucide-react"
+import { UtensilsCrossed, Plus, Trash2, X, ShoppingBag, CheckCircle, Minus } from "lucide-react"
 import api from "@/lib/axios"
 
 type OrderItem = {
@@ -16,6 +16,7 @@ type OrderItem = {
 type Order = {
   id: string
   total: number
+  tip: number        // ← NUEVO
   status: string
   items: OrderItem[]
 }
@@ -47,6 +48,10 @@ export default function TablesPage() {
   const [paymentMethod, setPaymentMethod] = useState<string>("")
   const [showPayment, setShowPayment] = useState(false)
 
+  // ── NUEVO: cantidad por producto y propina ──
+  const [quantities, setQuantities] = useState<Record<string, number>>({})
+  const [tipAmount, setTipAmount] = useState<number>(0)
+
   useEffect(() => {
     const user = JSON.parse(localStorage.getItem("user") || "{}")
     const t = localStorage.getItem("token") || ""
@@ -77,17 +82,17 @@ export default function TablesPage() {
     setActiveOrder(res.data)
   }
 
+  
   const handleTableClick = async (table: Table) => {
     setSelectedTable(table)
     setLoading(true)
 
     if (table.status === "DISPONIBLE") {
-      // Crear orden nueva
+      
       const res = await api.post("/orders", { tableId: table.id, restaurantId }, { headers })
       setActiveOrder(res.data)
-      await fetchTables()
+      
     } else {
-      // Cargar orden activa
       await fetchActiveOrder(table.id)
     }
 
@@ -95,27 +100,41 @@ export default function TablesPage() {
     setDrawerOpen(true)
   }
 
-  const handleAddProduct = async (productId: string) => {
+  
+  const handleAddProduct = async (productId: string, quantity: number) => {
     if (!activeOrder) return
     try {
-      await api.post(`/orders/${activeOrder.id}/items`, { productId, quantity: 1 }, { headers })
-      // Refrescar orden
+      await api.post(`/orders/${activeOrder.id}/items`, { productId, quantity }, { headers })
+
+      
+      if (selectedTable?.status === "DISPONIBLE") {
+        await api.patch(`/tables/${selectedTable.id}/status`, { status: "OCUPADA" }, { headers })
+       
+        setSelectedTable(prev => prev ? { ...prev, status: "OCUPADA" } : prev)
+      }
+
       const res = await api.get(`/orders/${activeOrder.id}`, { headers })
       setActiveOrder(res.data)
+      await fetchTables()
     } catch (error: any) {
       alert(error?.response?.data?.message || "Error al agregar producto")
     }
   }
 
+  
   const handleCloseOrder = async () => {
-    if (!activeOrder) return
-    await api.patch(`/orders/${activeOrder.id}/close`, { paymentMethod }, { headers })
-    setDrawerOpen(false)
-    setActiveOrder(null)
-    setSelectedTable(null)
-    setShowPayment(false)
-    setPaymentMethod("")
-    await fetchTables()
+  if (!activeOrder) return
+  await api.patch(`/orders/${activeOrder.id}/close`, {
+    paymentMethod,
+    tip: tipAmount,   
+  }, { headers })
+  setDrawerOpen(false)
+  setActiveOrder(null)
+  setSelectedTable(null)
+  setShowPayment(false)
+  setPaymentMethod("")
+  setTipAmount(0)   
+  await fetchTables()
   }
 
   const handleAddTable = async () => {
@@ -132,10 +151,19 @@ export default function TablesPage() {
   }
 
   const handleRemoveItem = async (itemId: string) => {
-  await api.delete(`/orders/items/${itemId}`, { headers })
-  const res = await api.get(`/orders/${activeOrder!.id}`, { headers })
-  setActiveOrder(res.data)
+    await api.delete(`/orders/items/${itemId}`, { headers })
+    const res = await api.get(`/orders/${activeOrder!.id}`, { headers })
+    setActiveOrder(res.data)
   }
+
+  // ── Helpers para cantidad ──
+  const getQty = (productId: string) => quantities[productId] ?? 1
+  const changeQty = (productId: string, delta: number) => {
+    setQuantities(q => ({ ...q, [productId]: Math.max(1, (q[productId] ?? 1) + delta) }))
+  }
+
+  const subtotal = activeOrder?.total ?? 0
+  const totalConPropina = subtotal + tipAmount
 
   const disponibles = tables.filter(t => t.status === "DISPONIBLE").length
   const ocupadas = tables.filter(t => t.status === "OCUPADA").length
@@ -199,13 +227,10 @@ export default function TablesPage() {
       {/* Drawer lateral */}
       {drawerOpen && (
         <div className="fixed inset-0 z-50 flex justify-end">
-          {/* Overlay */}
           <div className="absolute inset-0 bg-black/50" onClick={() => setDrawerOpen(false)} />
 
-          {/* Panel */}
           <div className="relative w-full max-w-md bg-slate-900 border-l border-slate-700 flex flex-col h-full overflow-hidden">
 
-            {/* Header del drawer */}
             <div className="flex items-center justify-between p-6 border-b border-slate-700">
               <div>
                 <h2 className="text-white font-bold text-xl">Mesa {selectedTable?.number}</h2>
@@ -218,10 +243,9 @@ export default function TablesPage() {
               </button>
             </div>
 
-            {/* Lista de productos para agregar */}
             <div className="flex-1 overflow-y-auto p-4 space-y-6">
 
-              {/* Ítems actuales */}
+              {/* Pedido actual */}
               {activeOrder && activeOrder.items && activeOrder.items.length > 0 && (
                 <div>
                   <h3 className="text-slate-400 text-sm font-medium mb-3 uppercase tracking-wide">
@@ -248,8 +272,6 @@ export default function TablesPage() {
                       </div>
                     ))}
                   </div>
-
-                  {/* Total */}
                   <div className="flex justify-between items-center mt-4 pt-4 border-t border-slate-700">
                     <span className="text-white font-bold text-lg">Total</span>
                     <span className="text-orange-400 font-bold text-xl">
@@ -259,7 +281,7 @@ export default function TablesPage() {
                 </div>
               )}
 
-              {/* Agregar productos */}
+              {/* ── FIX 3: Agregar productos con cantidad ── */}
               <div>
                 <h3 className="text-slate-400 text-sm font-medium mb-3 uppercase tracking-wide">
                   Agregar productos
@@ -268,18 +290,39 @@ export default function TablesPage() {
                   {products.map(product => (
                     <div
                       key={product.id}
-                      className="flex items-center justify-between bg-slate-800 hover:bg-slate-700 rounded-lg px-4 py-3 cursor-pointer transition-colors"
-                      onClick={() => handleAddProduct(product.id)}
+                      className="flex items-center justify-between bg-slate-800 rounded-lg px-4 py-3"
                     >
-                      <div>
+                      <div className="flex-1">
                         <p className="text-white text-sm font-medium">{product.name}</p>
                         <p className="text-slate-400 text-xs">{product.category?.name}</p>
                       </div>
-                      <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-2">
                         <span className="text-slate-300 text-sm">${product.price.toLocaleString()}</span>
-                        <div className="bg-orange-500/20 text-orange-400 rounded-full p-1">
-                          <Plus className="h-4 w-4" />
-                        </div>
+
+                        {/* Controles de cantidad */}
+                        <button
+                          onClick={() => changeQty(product.id, -1)}
+                          className="bg-slate-700 hover:bg-slate-600 text-white rounded-full p-1 transition-colors"
+                        >
+                          <Minus className="h-3 w-3" />
+                        </button>
+                        <span className="text-white text-sm font-bold w-5 text-center">
+                          {getQty(product.id)}
+                        </span>
+                        <button
+                          onClick={() => changeQty(product.id, 1)}
+                          className="bg-slate-700 hover:bg-slate-600 text-white rounded-full p-1 transition-colors"
+                        >
+                          <Plus className="h-3 w-3" />
+                        </button>
+
+                        {/* Botón agregar */}
+                        <button
+                          onClick={() => handleAddProduct(product.id, getQty(product.id))}
+                          className="bg-orange-500/20 hover:bg-orange-500/40 text-orange-400 rounded-lg px-3 py-1.5 text-xs font-bold transition-colors ml-1"
+                        >
+                          Agregar
+                        </button>
                       </div>
                     </div>
                   ))}
@@ -287,9 +330,8 @@ export default function TablesPage() {
               </div>
             </div>
 
-            {/* Footer con cerrar cuenta */}
+            {/* Footer */}
             <div className="p-4 border-t border-slate-700 space-y-3">
-
               {!showPayment ? (
                 <>
                   <Button
@@ -310,6 +352,7 @@ export default function TablesPage() {
                 </>
               ) : (
                 <>
+                  {/* Método de pago */}
                   <p className="text-slate-400 text-sm font-medium uppercase tracking-wide">
                     Método de pago
                   </p>
@@ -324,17 +367,69 @@ export default function TablesPage() {
                             : 'bg-slate-800 border-slate-600 text-slate-300 hover:border-orange-500'
                         }`}
                       >
-                        {method === 'Efectivo' ? '' : method === 'Datafono' ? '' : ''} {method}
+                        {method}
                       </button>
                     ))}
                   </div>
+
+                  {/* Propina */}
+                  <div className="bg-slate-800 rounded-xl p-4 space-y-3">
+                    <p className="text-slate-400 text-sm font-medium uppercase tracking-wide">Propina</p>
+
+                    {/* Botones rápidos de montos comunes */}
+                    <div className="grid grid-cols-4 gap-2">
+                      {[0, 2000, 5000, 10000].map(amount => (
+                        <button
+                          key={amount}
+                          onClick={() => setTipAmount(amount)}
+                          className={`py-2 rounded-lg text-sm font-bold transition-all border ${
+                            tipAmount === amount
+                              ? 'bg-orange-500 border-orange-500 text-white'
+                              : 'bg-slate-700 border-slate-600 text-slate-300 hover:border-orange-400'
+                          }`}
+                        >
+                          {amount === 0 ? 'Sin propina' : `$${amount.toLocaleString()}`}
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* Input para monto personalizado */}
+                    <div className="flex items-center gap-2">
+                      <span className="text-slate-400 text-sm">$</span>
+                      <input
+                        type="number"
+                        min={0}
+                        value={tipAmount === 0 ? '' : tipAmount}
+                        onChange={e => setTipAmount(Math.max(0, Number(e.target.value)))}
+                        placeholder="Monto personalizado"
+                        className="w-full bg-slate-700 text-white rounded-lg px-3 py-2 text-sm border border-slate-600 focus:border-orange-500 outline-none placeholder:text-slate-500"
+                      />
+                    </div>
+
+                    {/* Desglose */}
+                    <div className="space-y-1 pt-1 border-t border-slate-700">
+                      <div className="flex justify-between text-sm">
+                        <span className="text-slate-400">Subtotal</span>
+                        <span className="text-white">${subtotal.toLocaleString()}</span>
+                      </div>
+                      <div className="flex justify-between text-sm">
+                        <span className="text-slate-400">Propina</span>
+                        <span className="text-green-400">+${tipAmount.toLocaleString()}</span>
+                      </div>
+                      <div className="flex justify-between font-bold">
+                        <span className="text-white">Total</span>
+                        <span className="text-orange-400 text-lg">${totalConPropina.toLocaleString()}</span>
+                      </div>
+                    </div>
+                  </div>
+
                   <Button
                     onClick={handleCloseOrder}
                     disabled={!paymentMethod}
                     className="w-full bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white font-bold py-3"
                   >
                     <CheckCircle className="h-5 w-5 mr-2" />
-                    Confirmar · ${activeOrder?.total.toLocaleString() ?? 0}
+                    Confirmar · ${totalConPropina.toLocaleString()}
                   </Button>
                   <Button
                     variant="outline"

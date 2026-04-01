@@ -195,8 +195,8 @@ export default function DashboardPage() {
     </div>
   </CardHeader>
     <CardContent>
-      <div className="h-80">
-        <ResponsiveContainer width="100%" height="100%">
+      <div className="w-full" style={{ minWidth: 0 }}>
+        <ResponsiveContainer width="100%" height={320}>
           <BarChart data={chartData}>
             <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
             <XAxis 
@@ -271,6 +271,12 @@ export default function DashboardPage() {
             </table>
           </CardContent>
         </Card>
+      </div>
+      <div className="mt-12 pt-6 border-t border-slate-700/50 text-center">
+        <p className="text-slate-600 text-xs">
+          Sistema desarrollado por{" "}
+          <span className="text-orange-500/70 font-medium">@JuanCVO</span>
+        </p>
       </div>
     </div>
   )

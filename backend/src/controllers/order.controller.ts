@@ -18,11 +18,6 @@ export const createOrder = async (req: Request, res: Response) => {
       },
     })
 
-    await prisma.table.update({
-      where: { id: tableId },
-      data: { status: 'OCUPADA' },
-    })
-
     res.status(201).json(order)
   } catch (error) {
     res.status(500).json({ message: 'Error al crear orden' })
@@ -31,13 +26,11 @@ export const createOrder = async (req: Request, res: Response) => {
 
 export const getOrderById = async (req: Request, res: Response) => {
   try {
-    const id  = req.params.id as string
+    const id = req.params.id as string
     const order = await prisma.order.findUnique({
       where: { id },
       include: {
-        items: {
-          include: { product: true },
-        },
+        items: { include: { product: true } },
         table: true,
       },
     })
@@ -53,13 +46,11 @@ export const getOrderById = async (req: Request, res: Response) => {
 
 export const getActiveOrderByTable = async (req: Request, res: Response) => {
   try {
-    const  tableId  = req.params.tableId as string
+    const tableId = req.params.tableId as string
     const order = await prisma.order.findFirst({
       where: { tableId, status: 'ABIERTA' },
       include: {
-        items: {
-          include: { product: true },
-        },
+        items: { include: { product: true } },
       },
     })
     res.json(order)
@@ -103,6 +94,11 @@ export const addItemToOrder = async (req: Request, res: Response) => {
     const total = allItems.reduce((sum, i) => sum + i.unitPrice * i.quantity, 0)
     await prisma.order.update({ where: { id }, data: { total } })
 
+    await prisma.table.update({
+      where: { id: (await prisma.order.findUnique({ where: { id }, select: { tableId: true } }))?.tableId ?? '' },
+      data: { status: 'OCUPADA' },
+    })
+
     res.status(201).json(item)
   } catch (error) {
     res.status(500).json({ message: 'Error al agregar ítem' })
@@ -111,13 +107,13 @@ export const addItemToOrder = async (req: Request, res: Response) => {
 
 export const closeOrder = async (req: Request, res: Response) => {
   try {
-    const  id  = req.params.id as string
-    const  paymentMethod  = req.body.paymentMethod as string
+    const id = req.params.id as string
+    const { paymentMethod, tip = 0 } = req.body
 
     const order = await prisma.order.update({
       where: { id },
-      data: { status: 'CERRADA' , paymentMethod},
-      include: { items: { include: { product: true } } },
+      data: { status: 'CERRADA', paymentMethod, tip },
+      include: { items: { include: { product: true } }, table: true },
     })
 
     if (order.tableId) {
@@ -127,11 +123,50 @@ export const closeOrder = async (req: Request, res: Response) => {
       })
     }
 
-    res.json(order)
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+
+    const paymentField =
+      paymentMethod === 'Efectivo' ? 'efectivo'
+      : paymentMethod === 'Datafono' ? 'datafono'
+      : 'nequi'
+
+    const totalConPropina = order.total + tip
+
+    await prisma.dailySummary.upsert({
+      where: {
+        restaurantId_date: {
+          restaurantId: order.restaurantId,
+          date: today,
+        },
+      },
+      update: {
+        totalIngresos:  { increment: totalConPropina },
+        totalOrdenes:   { increment: 1 },
+        totalPlatos:    { increment: order.items.reduce((s, i) => s + i.quantity, 0) },
+        totalPropinas:  { increment: tip },
+        [paymentField]: { increment: totalConPropina },
+      },
+      create: {
+        date: today,
+        restaurantId: order.restaurantId,
+        totalIngresos: totalConPropina,
+        totalOrdenes: 1,
+        totalPlatos: order.items.reduce((s, i) => s + i.quantity, 0),
+        totalPropinas: tip,
+        efectivo:  paymentMethod === 'Efectivo'  ? totalConPropina : 0,
+        datafono:  paymentMethod === 'Datafono'  ? totalConPropina : 0,
+        nequi:     paymentMethod === 'Nequi'     ? totalConPropina : 0,
+      },
+    })
+
+    return res.json(order)
   } catch (error) {
-    res.status(500).json({ message: 'Error al cerrar orden' })
+    console.error(error)
+    return res.status(500).json({ message: 'Error al cerrar la orden' })
   }
 }
+
 export const removeItemFromOrder = async (req: Request, res: Response) => {
   try {
     const itemId = req.params.itemId as string
@@ -154,26 +189,25 @@ export const removeItemFromOrder = async (req: Request, res: Response) => {
     res.status(500).json({ message: 'Error al eliminar ítem' })
   }
 }
+
 export const getOrderHistory = async (req: Request, res: Response) => {
   try {
     const restaurantId = req.params.restaurantId as string
     const orders = await prisma.order.findMany({
-      where: {
-        restaurantId,
-        status: 'CERRADA',  
-      },
+      where: { restaurantId, status: 'CERRADA' },
       orderBy: { createdAt: 'desc' },
       take: 20,
       include: {
         table: true,
-        items: { include: { product: true } }
-      }
+        items: { include: { product: true } },
+      },
     })
     res.json(orders)
   } catch (error) {
     res.status(500).json({ message: 'Error al obtener historial' })
   }
 }
+
 export const getDashboardStats = async (req: Request, res: Response) => {
   try {
     const restaurantId = req.params.restaurantId as string
@@ -184,19 +218,19 @@ export const getDashboardStats = async (req: Request, res: Response) => {
     const ordersToday = await prisma.order.findMany({
       where: {
         restaurantId,
-        status: 'CERRADA',  
-        createdAt: { gte: startOfDay }
+        status: 'CERRADA',
+        createdAt: { gte: startOfDay },
       },
-      include: { items: true }
+      include: { items: true },
     })
 
     const tables = await prisma.table.findMany({ where: { restaurantId } })
 
-    const totalIngresos = ordersToday.reduce((sum, o) => sum + o.total, 0)
-    const totalPedidos = ordersToday.length
-    const totalPlatos = ordersToday.reduce((sum, o) => sum + o.items.length, 0)
-    const mesasOcupadas = tables.filter(t => t.status === 'OCUPADA').length
-    const totalMesas = tables.length
+    const totalIngresos  = ordersToday.reduce((sum, o) => sum + o.total + (o.tip ?? 0), 0)
+    const totalPedidos   = ordersToday.length
+    const totalPlatos    = ordersToday.reduce((sum, o) => sum + o.items.length, 0)
+    const mesasOcupadas  = tables.filter(t => t.status === 'OCUPADA').length
+    const totalMesas     = tables.length
 
     res.json({ totalIngresos, totalPedidos, totalPlatos, mesasOcupadas, totalMesas })
   } catch (error) {
