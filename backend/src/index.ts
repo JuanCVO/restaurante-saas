@@ -16,7 +16,7 @@ const PORT = process.env.PORT || 3001
 
 const allowedOrigins = [
   'http://localhost:3000',
-  'https://restaurante-saas-five.vercel.app'
+  'https://restaurante-saas-ashen.vercel.app'
 ]
 
 app.use(cors({
