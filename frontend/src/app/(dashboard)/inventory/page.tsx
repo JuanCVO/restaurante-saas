@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Package, Plus, AlertTriangle, Pencil, Trash2 } from "lucide-react"
+import { Package, Plus, AlertTriangle, Pencil, Trash2, X } from "lucide-react"
 import api from "@/lib/axios"
 
 type Product = {
@@ -23,6 +23,137 @@ type Category = {
   name: string
 }
 
+// Modal Component (flotante)
+const EditProductModal = ({
+  isOpen,
+  onClose,
+  editingProduct,
+  form,
+  setForm,
+  categories,
+  onSubmit,
+  restaurantId
+}: {
+  isOpen: boolean
+  onClose: () => void
+  editingProduct: Product | null
+  form: any
+  setForm: (form: any) => void
+  categories: Category[]
+  onSubmit: (e: React.FormEvent) => void
+  restaurantId: string
+}) => {
+  if (!isOpen) return null
+
+  return (
+    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+      <div className="bg-slate-800 border border-slate-700 rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+        {/* Header del modal */}
+        <div className="p-6 border-b border-slate-700 flex items-center justify-between">
+          <CardTitle className="text-2xl font-bold text-white">
+            {editingProduct ? "Editar producto" : "Nuevo producto"}
+          </CardTitle>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={onClose}
+            className="text-slate-400 hover:text-white hover:bg-slate-700 rounded-xl h-10 w-10 p-0"
+          >
+            <X className="h-5 w-5" />
+          </Button>
+        </div>
+
+        {/* Formulario */}
+        <form onSubmit={onSubmit} className="p-6 space-y-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="space-y-2">
+              <Label className="text-slate-300">Nombre</Label>
+              <Input
+                className="bg-slate-700 border-slate-600 text-white"
+                value={form.name}
+                onChange={e => setForm({ ...form, name: e.target.value })}
+                required
+              />
+            </div>
+            <div className="space-y-2">
+              <Label className="text-slate-300">Categoría</Label>
+              <select
+                className="w-full h-12 rounded-xl bg-slate-700 border border-slate-600 text-white px-4"
+                value={form.categoryId}
+                onChange={e => setForm({ ...form, categoryId: e.target.value })}
+                required
+              >
+                <option value="">Selecciona categoría</option>
+                {categories.map(c => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-2">
+              <Label className="text-slate-300">Precio</Label>
+              <Input
+                type="number"
+                className="bg-slate-700 border-slate-600 text-white"
+                value={form.price}
+                onChange={e => setForm({ ...form, price: e.target.value })}
+                required
+              />
+            </div>
+            <div className="space-y-2">
+              <Label className="text-slate-300">Unidad</Label>
+              <select
+                className="w-full h-12 rounded-xl bg-slate-700 border border-slate-600 text-white px-4"
+                value={form.unit}
+                onChange={e => setForm({ ...form, unit: e.target.value })}
+              >
+                <option value="unidades">Unidades</option>
+                <option value="kg">Kilogramos</option>
+                <option value="litros">Litros</option>
+                <option value="porciones">Porciones</option>
+              </select>
+            </div>
+            <div className="space-y-2">
+              <Label className="text-slate-300">Stock actual</Label>
+              <Input
+                type="number"
+                className="bg-slate-700 border-slate-600 text-white"
+                value={form.stock}
+                onChange={e => setForm({ ...form, stock: e.target.value })}
+                required
+              />
+            </div>
+            <div className="space-y-2">
+              <Label className="text-slate-300">Stock mínimo</Label>
+              <Input
+                type="number"
+                className="bg-slate-700 border-slate-600 text-white"
+                value={form.minStock}
+                onChange={e => setForm({ ...form, minStock: e.target.value })}
+                required
+              />
+            </div>
+          </div>
+          
+          <div className="flex gap-3 pt-4 border-t border-slate-700">
+            <Button type="submit" className="bg-orange-500 hover:bg-orange-600 text-white flex-1 h-12 rounded-xl">
+              {editingProduct ? "Guardar cambios" : "Crear producto"}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              className="border-slate-600 text-slate-300 hover:bg-slate-700 h-12 rounded-xl"
+              onClick={onClose}
+            >
+              Cancelar
+            </Button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
+
 export default function InventarioPage() {
   const [products, setProducts] = useState<Product[]>([])
   const [categories, setCategories] = useState<Category[]>([])
@@ -32,35 +163,29 @@ export default function InventarioPage() {
     name: "", price: "", unit: "unidades", stock: "", minStock: "5", categoryId: ""
   })
 
-const [restaurantId, setRestaurantId] = useState("")
+  const [restaurantId, setRestaurantId] = useState("")
 
-// 1️⃣ Primero las funciones
-const fetchProducts = async () => {
-  const res = await api.get(`/products/${restaurantId}`)
-  setProducts(res.data)
-}
+  
+  const fetchProducts = async () => {
+    const res = await api.get(`/products/${restaurantId}`)
+    setProducts(res.data)
+  }
 
-const fetchCategories = async () => {
-  console.log("4️⃣ llamando categorías con restaurantId:", restaurantId)
-  const res = await api.get(`/categories/${restaurantId}`)
-  console.log("5️⃣ respuesta categorías:", res.data)
-  setCategories(res.data)
-}
+  const fetchCategories = async () => {
+    const res = await api.get(`/categories/${restaurantId}`)
+    setCategories(res.data)
+  }
 
-// 2️⃣ Luego los useEffect
-useEffect(() => {
-  const user = JSON.parse(localStorage.getItem("user") || "{}")
-  console.log("1️⃣ user:", user)
-  console.log("2️⃣ restaurantId:", user.restaurantId)
-  if (user.restaurantId) setRestaurantId(user.restaurantId)
-}, [])
+  useEffect(() => {
+    const user = JSON.parse(localStorage.getItem("user") || "{}")
+    if (user.restaurantId) setRestaurantId(user.restaurantId)
+  }, [])
 
-useEffect(() => {
-  console.log("3️⃣ restaurantId state:", restaurantId)
-  if (!restaurantId) return
-  fetchCategories()
-  fetchProducts()
-}, [restaurantId])
+  useEffect(() => {
+    if (!restaurantId) return
+    fetchCategories()
+    fetchProducts()
+  }, [restaurantId])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -101,9 +226,14 @@ useEffect(() => {
     fetchProducts()
   }
 
+  const handleCloseModal = () => {
+    setShowForm(false)
+    setEditingProduct(null)
+    setForm({ name: "", price: "", unit: "unidades", stock: "", minStock: "5", categoryId: "" })
+  }
+
   return (
     <div className="p-8 space-y-6">
-
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -111,106 +241,24 @@ useEffect(() => {
           <p className="text-slate-400 mt-1">Gestiona tus productos y stock</p>
         </div>
         <Button
-          onClick={() => setShowForm(!showForm)}
+          onClick={() => setShowForm(true)}
           className="bg-orange-500 hover:bg-orange-600 text-white"
         >
           <Plus className="h-4 w-4 mr-2" /> Nuevo producto
         </Button>
       </div>
 
-      {/* Formulario */}
-      {showForm && (
-        <Card className="bg-slate-800 border-slate-700">
-          <CardHeader>
-            <CardTitle className="text-white">
-              {editingProduct ? "Editar producto" : "Nuevo producto"}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleSubmit} className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label className="text-slate-300">Nombre</Label>
-                <Input
-                  className="bg-slate-700 border-slate-600 text-white"
-                  value={form.name}
-                  onChange={e => setForm({ ...form, name: e.target.value })}
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <Label className="text-slate-300">Categoría</Label>
-                <select
-                  className="w-full h-10 rounded-md bg-slate-700 border border-slate-600 text-white px-3"
-                  value={form.categoryId}
-                  onChange={e => setForm({ ...form, categoryId: e.target.value })}
-                  required
-                >
-                  <option value="">Selecciona categoría</option>
-                  {categories.map(c => (
-                    <option key={c.id} value={c.id}>{c.name}</option>
-                  ))}
-                </select>
-              </div>
-              <div className="space-y-2">
-                <Label className="text-slate-300">Precio</Label>
-                <Input
-                  type="number"
-                  className="bg-slate-700 border-slate-600 text-white"
-                  value={form.price}
-                  onChange={e => setForm({ ...form, price: e.target.value })}
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <Label className="text-slate-300">Unidad</Label>
-                <select
-                  className="w-full h-10 rounded-md bg-slate-700 border border-slate-600 text-white px-3"
-                  value={form.unit}
-                  onChange={e => setForm({ ...form, unit: e.target.value })}
-                >
-                  <option value="unidades">Unidades</option>
-                  <option value="kg">Kilogramos</option>
-                  <option value="litros">Litros</option>
-                  <option value="porciones">Porciones</option>
-                </select>
-              </div>
-              <div className="space-y-2">
-                <Label className="text-slate-300">Stock actual</Label>
-                <Input
-                  type="number"
-                  className="bg-slate-700 border-slate-600 text-white"
-                  value={form.stock}
-                  onChange={e => setForm({ ...form, stock: e.target.value })}
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <Label className="text-slate-300">Stock mínimo</Label>
-                <Input
-                  type="number"
-                  className="bg-slate-700 border-slate-600 text-white"
-                  value={form.minStock}
-                  onChange={e => setForm({ ...form, minStock: e.target.value })}
-                  required
-                />
-              </div>
-              <div className="col-span-2 flex gap-3">
-                <Button type="submit" className="bg-orange-500 hover:bg-orange-600 text-white">
-                  {editingProduct ? "Guardar cambios" : "Crear producto"}
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="border-slate-600 text-slate-300"
-                  onClick={() => { setShowForm(false); setEditingProduct(null) }}
-                >
-                  Cancelar
-                </Button>
-              </div>
-            </form>
-          </CardContent>
-        </Card>
-      )}
+      {/* Modal flotante */}
+      <EditProductModal
+        isOpen={showForm}
+        onClose={handleCloseModal}
+        editingProduct={editingProduct}
+        form={form}
+        setForm={setForm}
+        categories={categories}
+        onSubmit={handleSubmit}
+        restaurantId={restaurantId}
+      />
 
       {/* Tabla */}
       <Card className="bg-slate-800 border-slate-700">
@@ -264,7 +312,7 @@ useEffect(() => {
               {products.length === 0 && (
                 <tr>
                   <td colSpan={7} className="p-8 text-center text-slate-400">
-                    No hay productos aún — crea el primero 👆
+                    No hay productos aún — crea el primero 
                   </td>
                 </tr>
               )}

@@ -7,7 +7,6 @@ import { Role } from '@prisma/client'
 export const register = async (req: Request, res: Response) => {
   try {
     const { name, email, password, restaurantId , role} = req.body
-    console.log("role recibido:", role)
 
     const existingUser = await prisma.user.findUnique({ where: { email } })
     if (existingUser) {

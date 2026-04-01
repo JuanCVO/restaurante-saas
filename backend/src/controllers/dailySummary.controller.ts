@@ -101,3 +101,51 @@ export const clearSummaries = async (req: Request, res: Response) => {
     return res.status(500).json({ message: "Error al limpiar los resúmenes." });
   }
 };
+
+export const getSummaryChart = async (req: Request, res: Response) => {
+  try {
+    const restaurantId = req.params.restaurantId as string
+    const period = (req.query.period as string) || "week"
+
+    const startDate = new Date()
+    startDate.setHours(0, 0, 0, 0)
+
+    if (period === "month") {
+      startDate.setDate(startDate.getDate() - 29)
+    } else {
+      startDate.setDate(startDate.getDate() - 6)
+    }
+
+    const summaries = await prisma.dailySummary.findMany({
+      where: {
+        restaurantId,
+        date: {
+          gte: startDate,
+        },
+      },
+      orderBy: {
+        date: "asc",
+      },
+    })
+
+    const data = summaries.map((item) => ({
+      date: item.date,
+      day: new Date(item.date).toLocaleDateString("es-CO", {
+        weekday: period === "week" ? "short" : undefined,
+        day: "2-digit",
+        month: "2-digit",
+      }),
+      pedidos: item.totalOrdenes,
+      ingresos: item.totalIngresos,
+      platos: item.totalPlatos,
+      efectivo: item.efectivo,
+      datafono: item.datafono,
+      nequi: item.nequi,
+    }))
+
+    return res.status(200).json(data)
+  } catch (error) {
+    console.error(error)
+    return res.status(500).json({ message: "Error al obtener la gráfica del resumen" })
+  }
+}

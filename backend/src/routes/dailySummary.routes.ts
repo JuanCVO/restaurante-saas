@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { closeDay, getDailySummaries, clearSummaries } from "../controllers/dailySummary.controller";
+import { closeDay, getDailySummaries, clearSummaries , getSummaryChart} from "../controllers/dailySummary.controller";
 import { downloadSummaryPDF } from "../controllers/pdf.controller";
 import { authMiddleware } from "../middlewares/auth.middleware";
 
@@ -10,5 +10,6 @@ router.post("/close", authMiddleware, closeDay);
 router.get("/pdf/:restaurantId", authMiddleware, downloadSummaryPDF);
 router.get("/:restaurantId", authMiddleware, getDailySummaries);
 router.delete("/:restaurantId", authMiddleware, clearSummaries);
+router.get("/chart/:restaurantId", authMiddleware, getSummaryChart)
 
 export default router;

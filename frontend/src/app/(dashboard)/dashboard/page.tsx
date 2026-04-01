@@ -4,6 +4,15 @@ import { useEffect, useState } from "react"
 import { ShoppingBag, Users, UtensilsCrossed, TrendingUp } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import api from "@/lib/axios"
+import {
+  ResponsiveContainer,
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  Tooltip,
+  CartesianGrid,
+} from "recharts"
 
 type Stats = {
   totalIngresos: number
@@ -22,7 +31,19 @@ type Order = {
   items: { id: string; quantity: number; product: { name: string } }[]
 }
 
+type SummaryChart = {
+  date: string
+  day: string
+  pedidos: number
+  ingresos: number
+  platos: number
+  efectivo: number
+  datafono: number
+  nequi: number
+}
 export default function DashboardPage() {
+  const [chartData, setChartData] = useState<SummaryChart[]>([])
+  const [period, setPeriod] = useState<"week" | "month">("week")
   const [stats, setStats] = useState<Stats | null>(null)
   const [history, setHistory] = useState<Order[]>([])
   const [restaurantId, setRestaurantId] = useState("")
@@ -49,6 +70,16 @@ export default function DashboardPage() {
     window.addEventListener("day-closed", handleDayClosed)
     return () => window.removeEventListener("day-closed", handleDayClosed)
   }, [])
+
+  useEffect(() => {
+    if (!restaurantId || !token) return
+
+    const headers = { Authorization: `Bearer ${token}` }
+
+    api.get(`/orders/stats/${restaurantId}`, { headers }).then((r) => setStats(r.data))
+    api.get(`/orders/history/${restaurantId}`, { headers }).then((r) => setHistory(r.data))
+    api.get(`/daily-summary/chart/${restaurantId}?period=${period}`, { headers }).then((r) => setChartData(r.data))
+  }, [restaurantId, token, period])
 
   const statCards = [
     {
@@ -91,7 +122,7 @@ export default function DashboardPage() {
       {/* Header */}
       <div>
         <h1 className="text-3xl font-bold text-white">Dashboard</h1>
-        <p className="text-slate-400 mt-1">Bienvenido de nuevo 👋</p>
+        <p className="text-slate-400 mt-1">Empecemos el Dia, Saludos</p>
       </div>
 
       {/* Stats */}
@@ -114,6 +145,63 @@ export default function DashboardPage() {
           )
         })}
       </div>
+      <Card className="bg-slate-800 border-slate-700">
+  <CardHeader className="flex flex-row items-center justify-between">
+    <CardTitle className="text-white">Ventas archivadas</CardTitle>
+
+    <div className="flex gap-2">
+      <button
+        onClick={() => setPeriod("week")}
+        className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+          period === "week"
+            ? "bg-orange-500 text-white"
+            : "bg-slate-700 text-slate-300 hover:bg-slate-600"
+        }`}
+      >
+        Semana
+      </button>
+
+      <button
+        onClick={() => setPeriod("month")}
+        className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+          period === "month"
+            ? "bg-orange-500 text-white"
+            : "bg-slate-700 text-slate-300 hover:bg-slate-600"
+        }`}
+      >
+        Mes
+      </button>
+    </div>
+  </CardHeader>
+    <CardContent>
+      <div className="h-80">
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart data={chartData}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+            <XAxis dataKey="day" stroke="#94a3b8" />
+            <YAxis stroke="#94a3b8" />
+            <Tooltip
+              contentStyle={{
+                backgroundColor: "#1e293b",
+                border: "1px solid #334155",
+                borderRadius: "12px",
+                color: "#fff",
+              }}
+            />
+            <Line
+              type="monotone"
+              dataKey="pedidos"
+              stroke="#f97316"
+              strokeWidth={3}
+              dot={{ r: 4 }}
+              activeDot={{ r: 6 }}
+              name="Pedidos"
+            />
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+    </CardContent>
+  </Card>
 
       {/* Historial de ventas */}
       <div>
