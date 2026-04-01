@@ -1,15 +1,25 @@
 import { Request, Response } from "express";
 import { prisma } from "../lib/prisma";
 
-// Helper: fecha local Colombia (UTC-5) sin desfase
-const getColombiaToday = () => {
+// Helper: rango del día completo en UTC ajustado a Colombia (UTC-5)
+const getColombiaDayRange = () => {
   const now = new Date()
-  const colombiaOffset = -5 * 60
-  const localTime = new Date(now.getTime() + colombiaOffset * 60000)
-  const year = localTime.getUTCFullYear()
-  const month = localTime.getUTCMonth()
-  const day = localTime.getUTCDate()
-  return new Date(year, month, day)
+  const colombiaOffset = -5 * 60 * 60 * 1000
+
+  const nowColombia = new Date(now.getTime() + colombiaOffset)
+  const startOfDayColombia = new Date(
+    Date.UTC(
+      nowColombia.getUTCFullYear(),
+      nowColombia.getUTCMonth(),
+      nowColombia.getUTCDate(),
+      0, 0, 0, 0
+    )
+  )
+
+  const today = new Date(startOfDayColombia.getTime() - colombiaOffset)
+  const tomorrow = new Date(today.getTime() + 24 * 60 * 60 * 1000)
+
+  return { today, tomorrow }
 }
 
 // POST /api/daily-summary/close
@@ -17,9 +27,7 @@ export const closeDay = async (req: Request, res: Response) => {
   try {
     const restaurantId = req.body.restaurantId as string
 
-    const today = getColombiaToday()
-    const tomorrow = new Date(today)
-    tomorrow.setDate(tomorrow.getDate() + 1)
+    const { today, tomorrow } = getColombiaDayRange()
 
     const orders = await prisma.order.findMany({
       where: {
@@ -116,7 +124,7 @@ export const getSummaryChart = async (req: Request, res: Response) => {
     const restaurantId = req.params.restaurantId as string
     const period = (req.query.period as string) || "week"
 
-    const startDate = getColombiaToday()
+    const { today: startDate } = getColombiaDayRange()
 
     if (period === "month") {
       startDate.setDate(startDate.getDate() - 29)
@@ -133,13 +141,13 @@ export const getSummaryChart = async (req: Request, res: Response) => {
     })
 
     const data = summaries.map((item) => {
-      // Extraemos DD/MM directo del ISO string sin pasar por Date ni toLocaleDateString
-      const iso = item.date.toISOString() // "2026-03-31T00:00:00.000Z"
-      const [year, month, day] = iso.slice(0, 10).split("-")
+      const iso = item.date.toISOString()   // "2026-03-31T05:00:00.000Z"
+      const slice = iso.slice(0, 10)        // "2026-03-31"
+      const [year, month, day] = slice.split("-")
       const formattedDay = `${day}/${month}` // "31/03"
 
       return {
-        date: iso.slice(0, 10),
+        date: slice,
         day: formattedDay,
         pedidos: item.totalOrdenes,
         ingresos: item.totalIngresos,
