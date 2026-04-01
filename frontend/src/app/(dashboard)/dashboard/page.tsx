@@ -6,8 +6,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import api from "@/lib/axios"
 import {
   ResponsiveContainer,
-  LineChart,
-  Line,
+  Bar,
+  BarChart,
   XAxis,
   YAxis,
   Tooltip,
@@ -78,7 +78,28 @@ export default function DashboardPage() {
 
     api.get(`/orders/stats/${restaurantId}`, { headers }).then((r) => setStats(r.data))
     api.get(`/orders/history/${restaurantId}`, { headers }).then((r) => setHistory(r.data))
-    api.get(`/daily-summary/chart/${restaurantId}?period=${period}`, { headers }).then((r) => setChartData(r.data))
+    api.get(`/daily-summary/chart/${restaurantId}?period=${period}`, { headers }).then((r) => {
+      setChartData(r.data)
+      const fixedData = r.data.map((item: SummaryChart) => {
+        const datePart = item.date.slice(0, 10) // "2026-03-31"
+        const parts = datePart.split("-")
+
+        let formattedDay = datePart // fallback
+
+        if (parts.length === 3) {
+          const day = parts[2]   // "31"
+          const month = parts[1] // "03"
+          formattedDay = `${day}/${month}` // "31/03" — sin Date, sin librería
+        }
+
+        return {
+          ...item,
+          day: formattedDay,
+        }
+      })
+
+      setChartData(fixedData)
+    })
   }, [restaurantId, token, period])
 
   const statCards = [
@@ -176,10 +197,17 @@ export default function DashboardPage() {
     <CardContent>
       <div className="h-80">
         <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={chartData}>
+          <BarChart data={chartData}>
             <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-            <XAxis dataKey="day" stroke="#94a3b8" />
-            <YAxis stroke="#94a3b8" />
+            <XAxis 
+              dataKey="day" 
+              stroke="#94a3b8"
+              tickFormatter={(value) => value.replace(/,/g, '/')}
+            />
+            <YAxis 
+              stroke="#94a3b8"
+              tickFormatter={(value) => `$${value.toLocaleString()}`}
+            />
             <Tooltip
               contentStyle={{
                 backgroundColor: "#1e293b",
@@ -187,17 +215,15 @@ export default function DashboardPage() {
                 borderRadius: "12px",
                 color: "#fff",
               }}
+              formatter={(value: number) => [`$${value.toLocaleString()}`, "Ingresos"]}
             />
-            <Line
-              type="monotone"
-              dataKey="pedidos"
-              stroke="#f97316"
-              strokeWidth={3}
-              dot={{ r: 4 }}
-              activeDot={{ r: 6 }}
-              name="Pedidos"
+            <Bar 
+              dataKey="ingresos"
+              fill="#10b981"
+              radius={[4, 4, 0, 0]}
+              activeBar={{ stroke: "#059669", strokeWidth: 2 }}
             />
-          </LineChart>
+          </BarChart>
         </ResponsiveContainer>
       </div>
     </CardContent>
