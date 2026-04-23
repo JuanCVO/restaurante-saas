@@ -95,7 +95,7 @@ export const downloadTodayPDF = async (req: Request, res: Response) => {
 
     drawDivider(doc, "#dddddd")
 
-    // Gastos operativos (se restan del ingreso)
+    // Gastos operativos
     doc.fontSize(13).font("Helvetica-Bold").fillColor("#000000").text("Gastos operativos del día")
     doc.moveDown(0.4)
     const totalGastos = summary.totalGastos ?? 0
@@ -108,13 +108,27 @@ export const downloadTodayPDF = async (req: Request, res: Response) => {
 
     drawDivider(doc, "#dddddd")
 
+    // Pagos a empleados
+    doc.fontSize(13).font("Helvetica-Bold").fillColor("#000000").text("Pagos a empleados del día")
+    doc.moveDown(0.4)
+    const totalPagosEmpleados = summary.totalPagosEmpleados ?? 0
+    if (totalPagosEmpleados > 0) {
+      drawRow(doc, "Total pagos a empleados (descontados)", col(totalPagosEmpleados), "#8e44ad")
+    } else {
+      doc.fontSize(11).font("Helvetica").fillColor("#aaaaaa").text("  Sin pagos a empleados registrados")
+      doc.moveDown(0.35)
+    }
+
+    drawDivider(doc, "#dddddd")
+
     // Resumen neto
     doc.fontSize(13).font("Helvetica-Bold").fillColor("#000000").text("Resumen neto")
     doc.moveDown(0.4)
     const ventasBrutas = summary.efectivo + summary.datafono + summary.nequi
-    drawRow(doc, "Ventas brutas",        col(ventasBrutas))
-    drawRow(doc, "Gastos",               `- ${col(totalGastos)}`, "#e74c3c")
-    drawRow(doc, "Total ingresos netos", col(summary.totalIngresos), "#27ae60", true)
+    drawRow(doc, "Ventas brutas",          col(ventasBrutas))
+    drawRow(doc, "Gastos operativos",      `- ${col(totalGastos)}`, "#e74c3c")
+    drawRow(doc, "Pagos a empleados",      `- ${col(totalPagosEmpleados)}`, "#8e44ad")
+    drawRow(doc, "Total ingresos netos",   col(summary.totalIngresos), "#27ae60", true)
 
     drawFooter(doc)
     doc.end()
@@ -153,25 +167,27 @@ export const downloadSummaryPDF = async (req: Request, res: Response) => {
     doc.moveDown(1.5)
 
     // Totales generales
-    const totalIngresos = summaries.reduce((s, d) => s + d.totalIngresos, 0)
-    const totalOrdenes  = summaries.reduce((s, d) => s + d.totalOrdenes, 0)
-    const totalEfectivo = summaries.reduce((s, d) => s + d.efectivo, 0)
-    const totalDatafono = summaries.reduce((s, d) => s + d.datafono, 0)
-    const totalNequi    = summaries.reduce((s, d) => s + d.nequi, 0)
-    const totalPropinas = summaries.reduce((s, d) => s + (d.totalPropinas ?? 0), 0)
-    const totalGastos   = summaries.reduce((s, d) => s + (d.totalGastos ?? 0), 0)
-    const ventasBrutas  = totalEfectivo + totalDatafono + totalNequi
+    const totalIngresos       = summaries.reduce((s, d) => s + d.totalIngresos, 0)
+    const totalOrdenes        = summaries.reduce((s, d) => s + d.totalOrdenes, 0)
+    const totalEfectivo       = summaries.reduce((s, d) => s + d.efectivo, 0)
+    const totalDatafono       = summaries.reduce((s, d) => s + d.datafono, 0)
+    const totalNequi          = summaries.reduce((s, d) => s + d.nequi, 0)
+    const totalPropinas       = summaries.reduce((s, d) => s + (d.totalPropinas ?? 0), 0)
+    const totalGastos         = summaries.reduce((s, d) => s + (d.totalGastos ?? 0), 0)
+    const totalPagosEmpleados = summaries.reduce((s, d) => s + (d.totalPagosEmpleados ?? 0), 0)
+    const ventasBrutas        = totalEfectivo + totalDatafono + totalNequi
 
     doc.fontSize(13).font("Helvetica-Bold").fillColor("#000000").text("Resumen general")
     doc.moveDown(0.4)
-    drawRow(doc, "Total órdenes",        `${totalOrdenes}`)
-    drawRow(doc, "Efectivo",             col(totalEfectivo))
-    drawRow(doc, "Datáfono",             col(totalDatafono))
-    drawRow(doc, "Nequi",                col(totalNequi))
-    drawRow(doc, "Propinas",             col(totalPropinas), "#27ae60")
-    drawRow(doc, "Ventas brutas",        col(ventasBrutas))
-    drawRow(doc, "Gastos operativos",    `- ${col(totalGastos)}`, "#e74c3c")
-    drawRow(doc, "Total ingresos netos", col(totalIngresos), "#27ae60", true)
+    drawRow(doc, "Total órdenes",          `${totalOrdenes}`)
+    drawRow(doc, "Efectivo",               col(totalEfectivo))
+    drawRow(doc, "Datáfono",               col(totalDatafono))
+    drawRow(doc, "Nequi",                  col(totalNequi))
+    drawRow(doc, "Propinas",               col(totalPropinas), "#27ae60")
+    drawRow(doc, "Ventas brutas",          col(ventasBrutas))
+    drawRow(doc, "Gastos operativos",      `- ${col(totalGastos)}`, "#e74c3c")
+    drawRow(doc, "Pagos a empleados",      `- ${col(totalPagosEmpleados)}`, "#8e44ad")
+    drawRow(doc, "Total ingresos netos",   col(totalIngresos), "#27ae60", true)
 
     drawDivider(doc, "#cccccc")
 
@@ -184,6 +200,7 @@ export const downloadSummaryPDF = async (req: Request, res: Response) => {
         weekday: "long", year: "numeric", month: "long", day: "numeric",
       })
       const gastosDia = summary.totalGastos ?? 0
+      const pagosDia  = summary.totalPagosEmpleados ?? 0
       const ventasDia = summary.efectivo + summary.datafono + summary.nequi
 
       doc.fontSize(11).font("Helvetica-Bold").fillColor("#e67e22").text(fecha)
@@ -193,6 +210,9 @@ export const downloadSummaryPDF = async (req: Request, res: Response) => {
       doc.fillColor("#27ae60").text(`  Propinas: ${col(summary.totalPropinas ?? 0)}`)
       if (gastosDia > 0) {
         doc.fillColor("#e74c3c").text(`  Gastos operativos: ${col(gastosDia)}`)
+      }
+      if (pagosDia > 0) {
+        doc.fillColor("#8e44ad").text(`  Pagos a empleados: ${col(pagosDia)}`)
       }
       doc.fillColor("#27ae60").font("Helvetica-Bold")
         .text(`  Ingreso neto del día: ${col(summary.totalIngresos)}`)

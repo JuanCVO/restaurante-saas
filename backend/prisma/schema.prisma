@@ -21,8 +21,9 @@ model Restaurant {
   products   Product[]
   orders     Order[]
   tables     Table[]
-  dailySummaries DailySummary[]
-  cashMovements CashMovement[]
+  dailySummaries   DailySummary[]
+  cashMovements    CashMovement[]
+  employeePayments EmployeePayment[]
 }
 
 model User {
@@ -35,7 +36,8 @@ model User {
   restaurant   Restaurant @relation(fields: [restaurantId], references: [id])
   createdAt    DateTime   @default(now())
 
-  orders Order[]
+  orders           Order[]
+  employeePayments EmployeePayment[]
 }
 
 enum Role {
@@ -127,9 +129,10 @@ model DailySummary {
   efectivo        Float    @default(0)
   datafono        Float    @default(0)
   nequi           Float    @default(0)
-  totalPropinas   Float    @default(0)
-  totalGastos     Float    @default(0)
-  restaurantId    String
+  totalPropinas       Float    @default(0)
+  totalGastos         Float    @default(0)
+  totalPagosEmpleados Float    @default(0)
+  restaurantId        String
   restaurant      Restaurant @relation(fields: [restaurantId], references: [id])
   createdAt       DateTime @default(now())
 
@@ -152,4 +155,16 @@ enum MovementType {
   COMPRA
   GASTO
   BASE_CAJA
+}
+
+model EmployeePayment {
+  id           String     @id @default(uuid())
+  userId       String
+  user         User       @relation(fields: [userId], references: [id])
+  restaurantId String
+  restaurant   Restaurant @relation(fields: [restaurantId], references: [id])
+  salary       Float      @default(0)
+  tip          Float      @default(0)
+  notes        String?
+  createdAt    DateTime   @default(now())
 }

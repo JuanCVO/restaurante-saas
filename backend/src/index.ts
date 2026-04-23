@@ -9,6 +9,7 @@ import tableRoutes from './routes/table.routes'
 import orderRoutes from './routes/order.routes'
 import dailySummaryRoutes from './routes/dailySummary.routes'
 import cashMovementRoutes from "./routes/cashMovement.routes"
+import employeePaymentRoutes from "./routes/employeePayment.routes"
 
 dotenv.config()
 
@@ -63,6 +64,7 @@ app.use('/api/tables', tableRoutes)
 app.use('/api/orders', orderRoutes)
 app.use('/api/daily-summary', dailySummaryRoutes)
 app.use("/api/cash-movements", cashMovementRoutes)
+app.use("/api/employee-payments", employeePaymentRoutes)
 
 app.use(errorHandler)
 

@@ -72,8 +72,13 @@ export const closeDay = async (req: Request, res: Response) => {
     })
     const totalGastos = gastosAgg._sum.amount ?? 0
 
-    const totalIngresos = orders.reduce((sum, o) => sum + o.total, 0) + baseCaja - totalGastos
+    const pagosAgg = await prisma.employeePayment.aggregate({
+      where: { restaurantId, createdAt: { gte: today, lt: tomorrow } },
+      _sum: { salary: true, tip: true },
+    })
+    const totalPagosEmpleados = (pagosAgg._sum.salary ?? 0) + (pagosAgg._sum.tip ?? 0)
 
+    const totalIngresos = orders.reduce((sum, o) => sum + o.total, 0) + baseCaja - totalGastos - totalPagosEmpleados
 
     const summary = await prisma.dailySummary.upsert({
       where: {
@@ -88,6 +93,7 @@ export const closeDay = async (req: Request, res: Response) => {
         totalPlatos,
         totalPropinas,
         totalGastos,
+        totalPagosEmpleados,
         efectivo,
         datafono,
         nequi,
@@ -100,6 +106,7 @@ export const closeDay = async (req: Request, res: Response) => {
         totalPlatos,
         totalPropinas,
         totalGastos,
+        totalPagosEmpleados,
         efectivo,
         datafono,
         nequi,
@@ -115,8 +122,10 @@ export const closeDay = async (req: Request, res: Response) => {
       data: { status: "ARCHIVADA" },
     })
 
-    // Limpia movimientos del día para que mañana empiece en cero
     await prisma.cashMovement.deleteMany({
+      where: { restaurantId, createdAt: { gte: today, lt: tomorrow } },
+    })
+    await prisma.employeePayment.deleteMany({
       where: { restaurantId, createdAt: { gte: today, lt: tomorrow } },
     })
 
