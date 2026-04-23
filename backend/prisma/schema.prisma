@@ -22,6 +22,7 @@ model Restaurant {
   orders     Order[]
   tables     Table[]
   dailySummaries DailySummary[]
+  cashMovements CashMovement[]
 }
 
 model User {
@@ -127,9 +128,28 @@ model DailySummary {
   datafono        Float    @default(0)
   nequi           Float    @default(0)
   totalPropinas   Float    @default(0)
+  totalGastos     Float    @default(0)
   restaurantId    String
   restaurant      Restaurant @relation(fields: [restaurantId], references: [id])
   createdAt       DateTime @default(now())
 
   @@unique([restaurantId, date])
+}
+
+model CashMovement {
+  id             String          @id @default(uuid())
+  type           MovementType
+  concept        String
+  amount         Float
+  paymentMethod  String? 
+  notes          String?
+  restaurantId   String
+  restaurant     Restaurant      @relation(fields: [restaurantId], references: [id])
+  createdAt      DateTime        @default(now())
+}
+
+enum MovementType {
+  COMPRA
+  GASTO
+  BASE_CAJA
 }

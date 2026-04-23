@@ -35,9 +35,16 @@ export default function LoginPage() {
         const { token, user } = response.data
         
         localStorage.setItem("token", token)
-        localStorage.setItem("user", JSON.stringify(user))
+        localStorage.setItem("user", JSON.stringify({
+          id:             user.id,
+          name:           user.name,
+          email:          user.email,
+          role:           user.role,
+          restaurantId:   user.restaurantId,
+          restaurantName: user.restaurantName,
+        }))
         
-        router.push("/dashboard")
+        router.push(user.role === "EMPLOYEE" ? "/tables" : "/dashboard")
     } catch (error: any) {
         const message = error.response?.data?.message || "Error al iniciar sesión"
         alert(message)

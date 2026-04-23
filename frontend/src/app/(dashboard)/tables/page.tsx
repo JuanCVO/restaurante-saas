@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { UtensilsCrossed, Plus, Trash2, X, ShoppingBag, CheckCircle, Minus } from "lucide-react"
+import { UtensilsCrossed, Plus, Trash2, X, ShoppingBag, CheckCircle, Minus, Search } from "lucide-react"
 import api from "@/lib/axios"
 
 type OrderItem = {
@@ -16,7 +16,7 @@ type OrderItem = {
 type Order = {
   id: string
   total: number
-  tip: number        // ← NUEVO
+  tip: number        
   status: string
   items: OrderItem[]
 }
@@ -48,9 +48,10 @@ export default function TablesPage() {
   const [paymentMethod, setPaymentMethod] = useState<string>("")
   const [showPayment, setShowPayment] = useState(false)
 
-  // ── NUEVO: cantidad por producto y propina ──
   const [quantities, setQuantities] = useState<Record<string, number>>({})
   const [tipAmount, setTipAmount] = useState<number>(0)
+  const [tableSearch, setTableSearch] = useState("")
+  const [productSearch, setProductSearch] = useState("")
 
   useEffect(() => {
     const user = JSON.parse(localStorage.getItem("user") || "{}")
@@ -115,6 +116,7 @@ export default function TablesPage() {
 
       const res = await api.get(`/orders/${activeOrder.id}`, { headers })
       setActiveOrder(res.data)
+      setQuantities(q => ({ ...q, [productId]: 1 }))
       await fetchTables()
     } catch (error: any) {
       alert(error?.response?.data?.message || "Error al agregar producto")
@@ -165,6 +167,14 @@ export default function TablesPage() {
   const subtotal = activeOrder?.total ?? 0
   const totalConPropina = subtotal + tipAmount
 
+  const filteredTables = tables.filter(t =>
+    t.number.toString().includes(tableSearch.trim())
+  )
+  const filteredProducts = products.filter(p =>
+    p.name.toLowerCase().includes(productSearch.toLowerCase().trim()) ||
+    p.category?.name.toLowerCase().includes(productSearch.toLowerCase().trim())
+  )
+
   const disponibles = tables.filter(t => t.status === "DISPONIBLE").length
   const ocupadas = tables.filter(t => t.status === "OCUPADA").length
 
@@ -184,9 +194,26 @@ export default function TablesPage() {
         </Button>
       </div>
 
+      {/* Buscador de mesas */}
+      <div style={{ position: "relative", maxWidth: 240 }}>
+        <Search style={{ position: "absolute", left: 11, top: "50%", transform: "translateY(-50%)", width: 14, height: 14, color: "#8b949e" }} />
+        <input
+          type="text"
+          value={tableSearch}
+          onChange={e => setTableSearch(e.target.value)}
+          placeholder="Buscar mesa..."
+          style={{
+            width: "100%", background: "#1c2128", color: "#e6edf3",
+            borderRadius: 8, paddingLeft: 34, paddingRight: 14, paddingTop: 8, paddingBottom: 8,
+            fontSize: 13, border: "1px solid rgba(255,255,255,0.08)",
+            outline: "none", boxSizing: "border-box",
+          }}
+        />
+      </div>
+
       {/* Grid de mesas */}
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-4">
-        {tables.map(table => {
+        {filteredTables.map(table => {
           const isOcupada = table.status === "OCUPADA"
           return (
             <Card
@@ -243,89 +270,143 @@ export default function TablesPage() {
               </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-4 space-y-6">
+            <div className="flex-1 overflow-y-auto p-4" style={{ display: "flex", flexDirection: "column", gap: 20 }}>
 
               {/* Pedido actual */}
               {activeOrder && activeOrder.items && activeOrder.items.length > 0 && (
                 <div>
-                  <h3 className="text-slate-400 text-sm font-medium mb-3 uppercase tracking-wide">
+                  <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.8, color: "#484f58", textTransform: "uppercase", marginBottom: 10 }}>
                     Pedido actual
-                  </h3>
-                  <div className="space-y-2">
-                    {activeOrder.items.map(item => (
-                      <div key={item.id} className="flex items-center justify-between bg-slate-800 rounded-lg px-4 py-3">
-                        <div>
-                          <p className="text-white text-sm font-medium">{item.product.name}</p>
-                          <p className="text-slate-400 text-xs">x{item.quantity} · ${item.unitPrice.toLocaleString()} c/u</p>
-                        </div>
-                        <div className="flex items-center gap-3">
-                          <p className="text-orange-400 font-bold text-sm">
-                            ${(item.quantity * item.unitPrice).toLocaleString()}
+                  </p>
+                  <div style={{ background: "#1c2128", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 12, overflow: "hidden" }}>
+                    {activeOrder.items.map((item, i) => (
+                      <div
+                        key={item.id}
+                        style={{
+                          display: "flex", alignItems: "center", justifyContent: "space-between",
+                          padding: "11px 16px",
+                          borderBottom: i < activeOrder.items.length - 1 ? "1px solid rgba(255,255,255,0.05)" : "none",
+                        }}
+                      >
+                        <div style={{ flex: 1 }}>
+                          <p style={{ color: "#e6edf3", fontSize: 13, fontWeight: 600 }}>{item.product.name}</p>
+                          <p style={{ color: "#8b949e", fontSize: 11, marginTop: 2 }}>
+                            x{item.quantity} · ${item.unitPrice.toLocaleString()} c/u
                           </p>
+                        </div>
+                        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                          <span style={{ color: "#f97316", fontWeight: 700, fontSize: 14 }}>
+                            ${(item.quantity * item.unitPrice).toLocaleString()}
+                          </span>
                           <button
                             onClick={() => handleRemoveItem(item.id)}
-                            className="text-slate-600 hover:text-red-400 transition-colors"
+                            style={{ color: "#484f58", background: "none", border: "none", cursor: "pointer", display: "flex" }}
+                            onMouseEnter={e => (e.currentTarget.style.color = "#f87171")}
+                            onMouseLeave={e => (e.currentTarget.style.color = "#484f58")}
                           >
-                            <Trash2 className="h-4 w-4" />
+                            <Trash2 style={{ width: 15, height: 15 }} />
                           </button>
                         </div>
                       </div>
                     ))}
-                  </div>
-                  <div className="flex justify-between items-center mt-4 pt-4 border-t border-slate-700">
-                    <span className="text-white font-bold text-lg">Total</span>
-                    <span className="text-orange-400 font-bold text-xl">
-                      ${activeOrder.total.toLocaleString()}
-                    </span>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 16px", borderTop: "1px solid rgba(255,255,255,0.08)" }}>
+                      <span style={{ color: "#8b949e", fontWeight: 600, fontSize: 13 }}>Total orden</span>
+                      <span style={{ color: "#f97316", fontWeight: 800, fontSize: 16 }}>${activeOrder.total.toLocaleString()}</span>
+                    </div>
                   </div>
                 </div>
               )}
 
-              {/* ── FIX 3: Agregar productos con cantidad ── */}
-              <div>
-                <h3 className="text-slate-400 text-sm font-medium mb-3 uppercase tracking-wide">
+              {/* Agregar productos */}
+              <div style={{ flex: 1 }}>
+                <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.8, color: "#484f58", textTransform: "uppercase", marginBottom: 10 }}>
                   Agregar productos
-                </h3>
-                <div className="space-y-2">
-                  {products.map(product => (
+                </p>
+
+                {/* Buscador */}
+                <div style={{ position: "relative", marginBottom: 12 }}>
+                  <Search style={{ position: "absolute", left: 11, top: "50%", transform: "translateY(-50%)", width: 14, height: 14, color: "#8b949e" }} />
+                  <input
+                    type="text"
+                    value={productSearch}
+                    onChange={e => setProductSearch(e.target.value)}
+                    placeholder="Buscar por nombre o categoría..."
+                    style={{
+                      width: "100%", background: "#161b22", color: "#e6edf3",
+                      borderRadius: 8, paddingLeft: 34, paddingRight: 14, paddingTop: 9, paddingBottom: 9,
+                      fontSize: 13, border: "1px solid rgba(255,255,255,0.08)",
+                      outline: "none", boxSizing: "border-box",
+                    }}
+                  />
+                </div>
+
+                {/* Grid de productos */}
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                  {filteredProducts.map(product => (
                     <div
                       key={product.id}
-                      className="flex items-center justify-between bg-slate-800 rounded-lg px-4 py-3"
+                      style={{
+                        background: "#161b22",
+                        border: "1px solid rgba(255,255,255,0.07)",
+                        borderRadius: 10, padding: 12,
+                        display: "flex", flexDirection: "column", gap: 6,
+                      }}
                     >
-                      <div className="flex-1">
-                        <p className="text-white text-sm font-medium">{product.name}</p>
-                        <p className="text-slate-400 text-xs">{product.category?.name}</p>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-slate-300 text-sm">${product.price.toLocaleString()}</span>
-
-                        {/* Controles de cantidad */}
+                      <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.4, color: "#8b949e", textTransform: "uppercase" }}>
+                        {product.category?.name ?? "—"}
+                      </span>
+                      <p style={{ color: "#e6edf3", fontWeight: 600, fontSize: 13, lineHeight: 1.3, flex: 1, margin: 0 }}>
+                        {product.name}
+                      </p>
+                      <p style={{ color: "#f97316", fontWeight: 700, fontSize: 15, margin: 0 }}>
+                        ${product.price.toLocaleString()}
+                      </p>
+                      <div style={{ display: "flex", alignItems: "center", gap: 4, marginTop: 2 }}>
                         <button
                           onClick={() => changeQty(product.id, -1)}
-                          className="bg-slate-700 hover:bg-slate-600 text-white rounded-full p-1 transition-colors"
+                          style={{
+                            background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.08)",
+                            color: "#e6edf3", borderRadius: 6, width: 26, height: 26,
+                            display: "flex", alignItems: "center", justifyContent: "center",
+                            cursor: "pointer", flexShrink: 0,
+                          }}
                         >
-                          <Minus className="h-3 w-3" />
+                          <Minus style={{ width: 11, height: 11 }} />
                         </button>
-                        <span className="text-white text-sm font-bold w-5 text-center">
+                        <span style={{ color: "#e6edf3", fontWeight: 700, fontSize: 13, width: 20, textAlign: "center" }}>
                           {getQty(product.id)}
                         </span>
                         <button
                           onClick={() => changeQty(product.id, 1)}
-                          className="bg-slate-700 hover:bg-slate-600 text-white rounded-full p-1 transition-colors"
+                          style={{
+                            background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.08)",
+                            color: "#e6edf3", borderRadius: 6, width: 26, height: 26,
+                            display: "flex", alignItems: "center", justifyContent: "center",
+                            cursor: "pointer", flexShrink: 0,
+                          }}
                         >
-                          <Plus className="h-3 w-3" />
+                          <Plus style={{ width: 11, height: 11 }} />
                         </button>
-
-                        {/* Botón agregar */}
                         <button
                           onClick={() => handleAddProduct(product.id, getQty(product.id))}
-                          className="bg-orange-500/20 hover:bg-orange-500/40 text-orange-400 rounded-lg px-3 py-1.5 text-xs font-bold transition-colors ml-1"
+                          style={{
+                            flex: 1, background: "rgba(249,115,22,0.15)",
+                            border: "1px solid rgba(249,115,22,0.3)",
+                            color: "#f97316", borderRadius: 6, padding: "5px 0",
+                            fontSize: 11, fontWeight: 700, cursor: "pointer",
+                          }}
                         >
-                          Agregar
+                          + Agregar
                         </button>
                       </div>
                     </div>
                   ))}
+
+                  {filteredProducts.length === 0 && (
+                    <div style={{ gridColumn: "1 / -1", textAlign: "center", padding: "24px 0", color: "#484f58", fontSize: 13 }}>
+                      Sin resultados
+                    </div>
+                  )}
                 </div>
               </div>
             </div>

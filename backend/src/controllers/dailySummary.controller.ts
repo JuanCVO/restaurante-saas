@@ -37,19 +37,43 @@ export const closeDay = async (req: Request, res: Response) => {
     }
 
     const totalPropinas = orders.reduce((sum, o) => sum + (o.tip ?? 0), 0)
-    const totalIngresos = orders.reduce((sum, o) => sum + o.total + (o.tip ?? 0), 0)
     const totalOrdenes  = orders.length
     const totalPlatos   = orders.reduce((sum, o) => sum + o.items.reduce((s, i) => s + i.quantity, 0), 0)
 
     const efectivo = orders
-      .filter((o) => o.paymentMethod === "Efectivo")
-      .reduce((sum, o) => sum + o.total + (o.tip ?? 0), 0)
+      .filter(o => o.paymentMethod === "Efectivo")
+      .reduce((sum, o) => sum + o.total, 0)
+
     const datafono = orders
-      .filter((o) => o.paymentMethod === "Datafono")
-      .reduce((sum, o) => sum + o.total + (o.tip ?? 0), 0)
+      .filter(o => o.paymentMethod === "Datafono")
+      .reduce((sum, o) => sum + o.total, 0)
+
     const nequi = orders
-      .filter((o) => o.paymentMethod === "Nequi")
-      .reduce((sum, o) => sum + o.total + (o.tip ?? 0), 0)
+      .filter(o => o.paymentMethod === "Nequi")
+      .reduce((sum, o) => sum + o.total, 0)
+
+    const baseCajaAgg = await prisma.cashMovement.aggregate({
+      where: {
+        restaurantId,
+        type: "BASE_CAJA",
+        createdAt: { gte: today, lt: tomorrow },
+      },
+      _sum: { amount: true },
+    })
+    const baseCaja = baseCajaAgg._sum.amount ?? 0
+
+    const gastosAgg = await prisma.cashMovement.aggregate({
+      where: {
+        restaurantId,
+        type: "GASTO",
+        createdAt: { gte: today, lt: tomorrow },
+      },
+      _sum: { amount: true },
+    })
+    const totalGastos = gastosAgg._sum.amount ?? 0
+
+    const totalIngresos = orders.reduce((sum, o) => sum + o.total, 0) + baseCaja - totalGastos
+
 
     const summary = await prisma.dailySummary.upsert({
       where: {
@@ -59,13 +83,14 @@ export const closeDay = async (req: Request, res: Response) => {
         },
       },
       update: {
-        totalIngresos:  { increment: totalIngresos },
-        totalOrdenes:   { increment: totalOrdenes },
-        totalPlatos:    { increment: totalPlatos },
-        totalPropinas:  { increment: totalPropinas },
-        efectivo:       { increment: efectivo },
-        datafono:       { increment: datafono },
-        nequi:          { increment: nequi },
+        totalIngresos,
+        totalOrdenes,
+        totalPlatos,
+        totalPropinas,
+        totalGastos,
+        efectivo,
+        datafono,
+        nequi,
       },
       create: {
         date: today,
@@ -74,6 +99,7 @@ export const closeDay = async (req: Request, res: Response) => {
         totalOrdenes,
         totalPlatos,
         totalPropinas,
+        totalGastos,
         efectivo,
         datafono,
         nequi,
@@ -87,6 +113,11 @@ export const closeDay = async (req: Request, res: Response) => {
         createdAt: { gte: today, lt: tomorrow },
       },
       data: { status: "ARCHIVADA" },
+    })
+
+    // Limpia movimientos del día para que mañana empiece en cero
+    await prisma.cashMovement.deleteMany({
+      where: { restaurantId, createdAt: { gte: today, lt: tomorrow } },
     })
 
     return res.status(201).json({ message: "Día cerrado correctamente.", summary })
@@ -159,5 +190,20 @@ export const getSummaryChart = async (req: Request, res: Response) => {
   } catch (error) {
     console.error(error)
     return res.status(500).json({ message: "Error al obtener la gráfica del resumen" })
+  }
+}
+export const getDailySummaryHistory = async (req: Request, res: Response) => {
+  try {
+    const restaurantId = req.params.restaurantId as string
+
+    const summaries = await prisma.dailySummary.findMany({
+      where: { restaurantId },
+      orderBy: { date: "desc" },
+    })
+
+    return res.json(summaries)
+  } catch (error) {
+    console.error(error)
+    return res.status(500).json({ message: "Error al obtener historial de cierres" })
   }
 }

@@ -75,15 +75,23 @@ export const addItemToOrder = async (req: Request, res: Response) => {
       return
     }
 
-    const item = await prisma.orderItem.create({
-      data: {
-        orderId: id,
-        productId,
-        quantity,
-        unitPrice: product.price,
-      },
-      include: { product: true },
+    const existingItem = await prisma.orderItem.findFirst({
+      where: { orderId: id, productId },
     })
+
+    let item
+    if (existingItem) {
+      item = await prisma.orderItem.update({
+        where: { id: existingItem.id },
+        data: { quantity: { increment: quantity } },
+        include: { product: true },
+      })
+    } else {
+      item = await prisma.orderItem.create({
+        data: { orderId: id, productId, quantity, unitPrice: product.price },
+        include: { product: true },
+      })
+    }
 
     await prisma.product.update({
       where: { id: productId },
@@ -226,13 +234,29 @@ export const getDashboardStats = async (req: Request, res: Response) => {
 
     const tables = await prisma.table.findMany({ where: { restaurantId } })
 
-    const totalIngresos  = ordersToday.reduce((sum, o) => sum + o.total + (o.tip ?? 0), 0)
-    const totalPedidos   = ordersToday.length
-    const totalPlatos    = ordersToday.reduce((sum, o) => sum + o.items.length, 0)
-    const mesasOcupadas  = tables.filter(t => t.status === 'OCUPADA').length
-    const totalMesas     = tables.length
+    // Solo ventas de productos (sin propina)
+    const totalIngresos = ordersToday.reduce((sum, o) => sum + o.total, 0)
 
-    res.json({ totalIngresos, totalPedidos, totalPlatos, mesasOcupadas, totalMesas })
+    // Solo propinas
+    const totalPropinas = ordersToday.reduce((sum, o) => sum + (o.tip ?? 0), 0)
+
+    // Total real que entró en caja
+    const totalRecibido = totalIngresos + totalPropinas
+
+    const totalPedidos  = ordersToday.length
+    const totalPlatos   = ordersToday.reduce((sum, o) => sum + o.items.reduce((s, i) => s + i.quantity, 0), 0)
+    const mesasOcupadas = tables.filter(t => t.status === 'OCUPADA').length
+    const totalMesas    = tables.length
+
+    res.json({
+      totalIngresos,
+      totalPropinas,
+      totalRecibido,
+      totalPedidos,
+      totalPlatos,
+      mesasOcupadas,
+      totalMesas,
+    })
   } catch (error) {
     res.status(500).json({ message: 'Error al obtener stats' })
   }
