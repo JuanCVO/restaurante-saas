@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { closeDay, getDailySummaries, clearSummaries, getSummaryChart, getDailySummaryHistory } from "../controllers/dailySummary.controller";
+import { closeDay, getDailySummaries, clearSummaries, getSummaryChart, getDailySummaryHistory, deleteDailySummary } from "../controllers/dailySummary.controller";
 import { downloadSummaryPDF, downloadTodayPDF } from "../controllers/pdf.controller";
 import { authMiddleware, adminOnly } from "../middlewares/auth.middleware";
 
@@ -11,6 +11,7 @@ router.get("/pdf/:restaurantId", authMiddleware, adminOnly, downloadSummaryPDF);
 router.get("/chart/:restaurantId", authMiddleware, getSummaryChart);
 router.get("/history/:restaurantId", authMiddleware, getDailySummaryHistory);
 
+router.delete("/entry/:id", authMiddleware, adminOnly, deleteDailySummary);
 router.get("/:restaurantId", authMiddleware, getDailySummaries);
 router.delete("/:restaurantId", authMiddleware, adminOnly, clearSummaries);
 

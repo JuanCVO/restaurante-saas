@@ -48,6 +48,7 @@ const drawFooter = (doc: PDFKit.PDFDocument) => {
   doc.fontSize(8).text(
     `Generado el ${new Date().toLocaleDateString("es-CO", {
       year: "numeric", month: "long", day: "numeric", hour: "2-digit", minute: "2-digit",
+      timeZone: "America/Bogota",
     })}`,
     { align: "center" }
   )
@@ -60,6 +61,7 @@ export const downloadTodayPDF = async (req: Request, res: Response) => {
 
     const summary = await prisma.dailySummary.findFirst({
       where: { restaurantId, date: { gte: today, lt: tomorrow } },
+      orderBy: { createdAt: "desc" },
     })
 
     if (!summary) {
@@ -71,6 +73,7 @@ export const downloadTodayPDF = async (req: Request, res: Response) => {
 
     const dateStr = summary.date.toLocaleDateString("es-CO", {
       weekday: "long", year: "numeric", month: "long", day: "numeric",
+      timeZone: "America/Bogota",
     })
 
     res.setHeader("Content-Type", "application/pdf")
@@ -198,6 +201,7 @@ export const downloadSummaryPDF = async (req: Request, res: Response) => {
     for (const summary of summaries) {
       const fecha = new Date(summary.date).toLocaleDateString("es-CO", {
         weekday: "long", year: "numeric", month: "long", day: "numeric",
+        timeZone: "America/Bogota",
       })
       const gastosDia = summary.totalGastos ?? 0
       const pagosDia  = summary.totalPagosEmpleados ?? 0

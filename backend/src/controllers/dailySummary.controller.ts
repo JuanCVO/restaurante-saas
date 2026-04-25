@@ -125,9 +125,6 @@ export const closeDay = async (req: Request, res: Response) => {
     await prisma.cashMovement.deleteMany({
       where: { restaurantId, createdAt: { gte: today, lt: tomorrow } },
     })
-    await prisma.employeePayment.deleteMany({
-      where: { restaurantId, createdAt: { gte: today, lt: tomorrow } },
-    })
 
     return res.status(201).json({ message: "Día cerrado correctamente.", summary })
   } catch (error) {
@@ -165,23 +162,27 @@ export const getSummaryChart = async (req: Request, res: Response) => {
   try {
     const restaurantId = req.params.restaurantId as string
     const period = (req.query.period as string) || "week"
-    const { today: startDate } = getColombiaDayRange()
+    const { today, tomorrow } = getColombiaDayRange()
 
+    const startDate = new Date(today)
     if (period === "month") {
-      startDate.setDate(startDate.getDate() - 29)
+      startDate.setUTCDate(startDate.getUTCDate() - 29)
     } else {
-      startDate.setDate(startDate.getDate() - 6)
+      startDate.setUTCDate(startDate.getUTCDate() - 6)
     }
 
     const summaries = await prisma.dailySummary.findMany({
-      where: { restaurantId, date: { gte: startDate } },
+      where: { restaurantId, date: { gte: startDate, lt: tomorrow } },
       orderBy: { date: "asc" },
     })
 
+    const fmtCO = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "America/Bogota", year: "numeric", month: "2-digit", day: "2-digit",
+    })
+
     const data = summaries.map((item) => {
-      const iso   = item.date.toISOString()
-      const slice = iso.slice(0, 10)
-      const [year, month, day] = slice.split("-")
+      const slice = fmtCO.format(item.date)       // "2026-04-24" in Colombia time
+      const [, month, day] = slice.split("-")
       return {
         date:      slice,
         day:       `${day}/${month}`,
@@ -201,6 +202,17 @@ export const getSummaryChart = async (req: Request, res: Response) => {
     return res.status(500).json({ message: "Error al obtener la gráfica del resumen" })
   }
 }
+export const deleteDailySummary = async (req: Request, res: Response) => {
+  try {
+    const id = req.params.id as string
+    await prisma.dailySummary.delete({ where: { id } })
+    return res.json({ message: "Resumen eliminado" })
+  } catch (error) {
+    console.error(error)
+    return res.status(500).json({ message: "Error al eliminar el resumen." })
+  }
+}
+
 export const getDailySummaryHistory = async (req: Request, res: Response) => {
   try {
     const restaurantId = req.params.restaurantId as string
