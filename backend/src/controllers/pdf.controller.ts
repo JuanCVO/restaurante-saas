@@ -95,6 +95,10 @@ export const downloadTodayPDF = async (req: Request, res: Response) => {
     drawRow(doc, "Datáfono",        col(summary.datafono))
     drawRow(doc, "Nequi",           col(summary.nequi))
     drawRow(doc, "Propinas",        col(summary.totalPropinas ?? 0), "#27ae60")
+    const baseCajaPDF = summary.baseCaja ?? 0
+    if (baseCajaPDF > 0) {
+      drawRow(doc, "Base de caja", col(baseCajaPDF), "#3498db")
+    }
 
     drawDivider(doc, "#dddddd")
 
@@ -129,6 +133,9 @@ export const downloadTodayPDF = async (req: Request, res: Response) => {
     doc.moveDown(0.4)
     const ventasBrutas = summary.efectivo + summary.datafono + summary.nequi
     drawRow(doc, "Ventas brutas",          col(ventasBrutas))
+    if (baseCajaPDF > 0) {
+      drawRow(doc, "Base de caja",         `+ ${col(baseCajaPDF)}`, "#3498db")
+    }
     drawRow(doc, "Gastos operativos",      `- ${col(totalGastos)}`, "#e74c3c")
     drawRow(doc, "Pagos a empleados",      `- ${col(totalPagosEmpleados)}`, "#8e44ad")
     drawRow(doc, "Total ingresos netos",   col(summary.totalIngresos), "#27ae60", true)
@@ -203,15 +210,19 @@ export const downloadSummaryPDF = async (req: Request, res: Response) => {
         weekday: "long", year: "numeric", month: "long", day: "numeric",
         timeZone: "America/Bogota",
       })
-      const gastosDia = summary.totalGastos ?? 0
-      const pagosDia  = summary.totalPagosEmpleados ?? 0
-      const ventasDia = summary.efectivo + summary.datafono + summary.nequi
+      const gastosDia   = summary.totalGastos ?? 0
+      const pagosDia    = summary.totalPagosEmpleados ?? 0
+      const baseCajaDia = summary.baseCaja ?? 0
+      const ventasDia   = summary.efectivo + summary.datafono + summary.nequi
 
       doc.fontSize(11).font("Helvetica-Bold").fillColor("#e67e22").text(fecha)
       doc.fontSize(10).font("Helvetica").fillColor("#333333")
         .text(`  Ventas: ${col(ventasDia)}   |   Órdenes: ${summary.totalOrdenes}   |   Platos: ${summary.totalPlatos}`)
       doc.text(`  Efectivo: ${col(summary.efectivo)}   |   Datáfono: ${col(summary.datafono)}   |   Nequi: ${col(summary.nequi)}`)
       doc.fillColor("#27ae60").text(`  Propinas: ${col(summary.totalPropinas ?? 0)}`)
+      if (baseCajaDia > 0) {
+        doc.fillColor("#3498db").text(`  Base de caja: ${col(baseCajaDia)}`)
+      }
       if (gastosDia > 0) {
         doc.fillColor("#e74c3c").text(`  Gastos operativos: ${col(gastosDia)}`)
       }

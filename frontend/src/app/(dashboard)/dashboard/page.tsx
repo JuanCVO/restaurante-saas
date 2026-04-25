@@ -208,7 +208,7 @@ export default function DashboardPage() {
       .then(r => {
         const fixedData = r.data.map((item: SummaryChart) => {
           const [, month, day] = item.date.slice(0, 10).split("-")
-          return { ...item, day: `${day}/${month}`, ingresos: item.ingresos - (item.propinas ?? 0) }
+          return { ...item, day: `${day}/${month}` }
         })
         setChartData(fixedData)
       })

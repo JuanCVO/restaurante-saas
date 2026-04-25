@@ -132,6 +132,7 @@ model DailySummary {
   totalPropinas       Float    @default(0)
   totalGastos         Float    @default(0)
   totalPagosEmpleados Float    @default(0)
+  baseCaja            Float    @default(0)
   restaurantId        String
   restaurant      Restaurant @relation(fields: [restaurantId], references: [id])
   createdAt       DateTime @default(now())
