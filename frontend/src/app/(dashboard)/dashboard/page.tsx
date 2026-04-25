@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { ShoppingBag, Users, UtensilsCrossed, TrendingUp } from "lucide-react"
+import { ShoppingBag, Users, UtensilsCrossed, TrendingUp, Trash2 } from "lucide-react"
 import api from "@/lib/axios"
 import TopBar from "@/components/ui/layout/TopBar"
 import StatCard from "@/components/ui/layout/StatCard"
@@ -161,6 +161,18 @@ export default function DashboardPage() {
   const [summaryHistory, setSummaryHistory] = useState<SummaryHistory[]>([])
   const [baseCaja, setBaseCaja]           = useState(0)
   const [restaurantName, setRestaurantName] = useState("")
+  const [deletingId, setDeletingId]       = useState<string | null>(null)
+
+  const handleDeleteSummary = async (id: string) => {
+    if (!confirm("¿Eliminar este cierre del historial?")) return
+    setDeletingId(id)
+    try {
+      await api.delete(`daily-summary/entry/${id}`, { headers: { Authorization: `Bearer ${token}` } })
+      setSummaryHistory(prev => prev.filter(s => s.id !== id))
+    } finally {
+      setDeletingId(null)
+    }
+  }
 
   useEffect(() => {
     const user = JSON.parse(localStorage.getItem("user") || "{}")
@@ -453,7 +465,7 @@ export default function DashboardPage() {
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <thead>
                 <tr style={{ borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
-                  {["Fecha","Órdenes","Platos","Propinas","Gastos","Ingresos netos"].map(h => (
+                  {["Fecha","Órdenes","Platos","Propinas","Gastos","Ingresos netos",""].map(h => (
                     <th key={h} style={{
                       textAlign: "left", padding: "10px 16px",
                       fontSize: 11, fontWeight: 700,
@@ -473,7 +485,7 @@ export default function DashboardPage() {
                     onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
                   >
                     <td style={{ padding: "11px 16px", color: "#8b949e", fontSize: 13 }}>
-                      {new Date(s.date).toLocaleDateString("es-CO", { day: "2-digit", month: "2-digit", year: "numeric" })}
+                      {new Date(s.date).toLocaleDateString("es-CO", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: "America/Bogota" })}
                     </td>
                     <td style={{ padding: "11px 16px", fontWeight: 700, color: "#e6edf3" }}>
                       {s.totalOrdenes}
@@ -492,11 +504,25 @@ export default function DashboardPage() {
                     <td style={{ padding: "11px 16px", fontWeight: 700, color: "#f97316", fontSize: 14 }}>
                       ${s.totalIngresos.toLocaleString()}
                     </td>
+                    <td style={{ padding: "11px 16px" }}>
+                      <button
+                        onClick={() => handleDeleteSummary(s.id)}
+                        disabled={deletingId === s.id}
+                        title="Eliminar cierre"
+                        style={{
+                          background: "none", border: "none", cursor: "pointer",
+                          color: deletingId === s.id ? "#484f58" : "#f87171",
+                          padding: 4, display: "flex", alignItems: "center",
+                        }}
+                      >
+                        <Trash2 size={15} />
+                      </button>
+                    </td>
                   </tr>
                 ))}
                 {summaryHistory.length === 0 && (
                   <tr>
-                    <td colSpan={6} style={{ padding: 32, textAlign: "center", color: "#484f58", fontSize: 14 }}>
+                    <td colSpan={7} style={{ padding: 32, textAlign: "center", color: "#484f58", fontSize: 14 }}>
                       No hay cierres registrados aún
                     </td>
                   </tr>
