@@ -1,6 +1,7 @@
 "use client"
 import { useRouter } from "next/navigation"
 import api from "@/lib/axios"
+import { setSession } from "@/lib/auth"
 import { useState } from "react"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
@@ -9,7 +10,8 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Eye, EyeOff, UtensilsCrossed } from "lucide-react"
+import { Eye, EyeOff } from "lucide-react"
+import Image from "next/image"
 
 const loginSchema = z.object({
   email: z.string().email("Email inválido"),
@@ -33,17 +35,16 @@ export default function LoginPage() {
     try {
         const response = await api.post("/auth/login", data)
         const { token, user } = response.data
-        
-        localStorage.setItem("token", token)
-        localStorage.setItem("user", JSON.stringify({
+
+        setSession(token, {
           id:             user.id,
           name:           user.name,
           email:          user.email,
           role:           user.role,
           restaurantId:   user.restaurantId,
           restaurantName: user.restaurantName,
-        }))
-        
+        })
+
         router.push(user.role === "EMPLOYEE" ? "/tables" : "/dashboard")
     } catch (error: any) {
         const message = error.response?.data?.message || "Error al iniciar sesión"
@@ -58,12 +59,14 @@ export default function LoginPage() {
       <div className="w-full max-w-md space-y-6">
 
         <div className="flex flex-col items-center gap-2">
-          <div className="bg-orange-500 p-3 rounded-2xl">
-            <UtensilsCrossed className="h-8 w-8 text-white" />
-          </div>
-          <h1 className="text-2xl font-bold text-white" style={{ fontFamily: "var(--font-playfair)" }}>
-           RestaurantOS
-          </h1>
+          <Image
+            src="/LogoRestaurantOS.png"
+            alt="RestaurantOS"
+            width={800}
+            height={800}
+            className="object-contain w-auto h-auto"
+            priority
+          />
           <p className="text-slate-400 text-sm">Gestiona tu restaurante fácilmente</p>
         </div>
 
@@ -80,7 +83,7 @@ export default function LoginPage() {
               <div className="space-y-2">
                 <Label className="text-slate-300">Email</Label>
                 <Input
-                  placeholder="juan@restaurante.com"
+                  placeholder="ejemplo@restaurante.com"
                   className="bg-slate-700 border-slate-600 text-white placeholder:text-slate-500"
                   {...register("email")}
                 />

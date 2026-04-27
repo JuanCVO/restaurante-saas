@@ -5,28 +5,8 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { UtensilsCrossed, Plus, Trash2, X, ShoppingBag, CheckCircle, Minus, Search } from "lucide-react"
 import api from "@/lib/axios"
-
-type OrderItem = {
-  id: string
-  quantity: number
-  unitPrice: number
-  product: { id: string; name: string; price: number }
-}
-
-type Order = {
-  id: string
-  total: number
-  tip: number        
-  status: string
-  items: OrderItem[]
-}
-
-type Table = {
-  id: string
-  number: number
-  status: "DISPONIBLE" | "OCUPADA"
-  orders: Order[]
-}
+import { useCurrentUser, authHeaders } from "@/lib/auth"
+import type { Table, Order, OrderItem } from "@/types/api"
 
 type Product = {
   id: string
@@ -36,17 +16,23 @@ type Product = {
   category: { name: string }
 }
 
+type ConfirmModal = {
+  title: string
+  message: string
+  onConfirm: () => void
+}
+
 export default function TablesPage() {
   const [tables, setTables] = useState<Table[]>([])
   const [products, setProducts] = useState<Product[]>([])
-  const [restaurantId, setRestaurantId] = useState("")
-  const [token, setToken] = useState("")
+  const { token, restaurantId } = useCurrentUser()
   const [selectedTable, setSelectedTable] = useState<Table | null>(null)
   const [activeOrder, setActiveOrder] = useState<Order | null>(null)
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [loading, setLoading] = useState(false)
   const [paymentMethod, setPaymentMethod] = useState<string>("")
   const [showPayment, setShowPayment] = useState(false)
+  const [confirmModal, setConfirmModal] = useState<ConfirmModal | null>(null)
 
   const [quantities, setQuantities] = useState<Record<string, number>>({})
   const [tipAmount, setTipAmount] = useState<number>(0)
@@ -54,45 +40,33 @@ export default function TablesPage() {
   const [productSearch, setProductSearch] = useState("")
 
   useEffect(() => {
-    const user = JSON.parse(localStorage.getItem("user") || "{}")
-    const t = localStorage.getItem("token") || ""
-    if (user.restaurantId) setRestaurantId(user.restaurantId)
-    setToken(t)
-  }, [])
-
-  useEffect(() => {
     if (!restaurantId || !token) return
     fetchTables()
     fetchProducts()
   }, [restaurantId, token])
 
-  const headers = { Authorization: `Bearer ${token}` }
-
   const fetchTables = async () => {
-    const res = await api.get(`/tables/${restaurantId}`, { headers })
+    const res = await api.get(`/tables/${restaurantId}`, { headers: authHeaders() })
     setTables(res.data)
   }
 
   const fetchProducts = async () => {
-    const res = await api.get(`/products/${restaurantId}`, { headers })
+    const res = await api.get(`/products/${restaurantId}`, { headers: authHeaders() })
     setProducts(res.data)
   }
 
   const fetchActiveOrder = async (tableId: string) => {
-    const res = await api.get(`/orders/table/${tableId}`, { headers })
+    const res = await api.get(`/orders/table/${tableId}`, { headers: authHeaders() })
     setActiveOrder(res.data)
   }
 
-  
   const handleTableClick = async (table: Table) => {
     setSelectedTable(table)
     setLoading(true)
 
     if (table.status === "DISPONIBLE") {
-      
-      const res = await api.post("/orders", { tableId: table.id, restaurantId }, { headers })
+      const res = await api.post("/orders", { tableId: table.id, restaurantId }, { headers: authHeaders() })
       setActiveOrder(res.data)
-      
     } else {
       await fetchActiveOrder(table.id)
     }
@@ -101,67 +75,87 @@ export default function TablesPage() {
     setDrawerOpen(true)
   }
 
-  
   const handleAddProduct = async (productId: string, quantity: number) => {
     if (!activeOrder) return
     try {
-      await api.post(`/orders/${activeOrder.id}/items`, { productId, quantity }, { headers })
+      await api.post(`/orders/${activeOrder.id}/items`, { productId, quantity }, { headers: authHeaders() })
 
-      
       if (selectedTable?.status === "DISPONIBLE") {
-        await api.patch(`/tables/${selectedTable.id}/status`, { status: "OCUPADA" }, { headers })
-       
+        await api.patch(`/tables/${selectedTable.id}/status`, { status: "OCUPADA" }, { headers: authHeaders() })
         setSelectedTable(prev => prev ? { ...prev, status: "OCUPADA" } : prev)
+        setTables(prev => prev.map(t => t.id === selectedTable.id ? { ...t, status: "OCUPADA" } : t))
       }
 
-      const res = await api.get(`/orders/${activeOrder.id}`, { headers })
+      const res = await api.get(`/orders/${activeOrder.id}`, { headers: authHeaders() })
       setActiveOrder(res.data)
       setQuantities(q => ({ ...q, [productId]: 1 }))
-      await fetchTables()
     } catch (error: any) {
       alert(error?.response?.data?.message || "Error al agregar producto")
     }
   }
 
-  
   const handleCloseOrder = async () => {
-  if (!activeOrder) return
-  await api.patch(`/orders/${activeOrder.id}/close`, {
-    paymentMethod,
-    tip: tipAmount,   
-  }, { headers })
-  setDrawerOpen(false)
-  setActiveOrder(null)
-  setSelectedTable(null)
-  setShowPayment(false)
-  setPaymentMethod("")
-  setTipAmount(0)   
-  await fetchTables()
+    if (!activeOrder) return
+    await api.patch(`/orders/${activeOrder.id}/close`, {
+      paymentMethod,
+      tip: tipAmount,
+    }, { headers: authHeaders() })
+    setDrawerOpen(false)
+    setActiveOrder(null)
+    setSelectedTable(null)
+    setShowPayment(false)
+    setPaymentMethod("")
+    setTipAmount(0)
+    await fetchTables()
   }
 
   const handleAddTable = async () => {
     const nextNumber = tables.length > 0 ? Math.max(...tables.map(t => t.number)) + 1 : 1
-    await api.post("/tables", { number: nextNumber, restaurantId }, { headers })
+    await api.post("/tables", { number: nextNumber, restaurantId }, { headers: authHeaders() })
     fetchTables()
   }
 
-  const handleDeleteTable = async (id: string, e: React.MouseEvent) => {
+  const handleDeleteTable = (id: string, e: React.MouseEvent) => {
     e.stopPropagation()
-    if (!confirm("¿Eliminar esta mesa?")) return
-    await api.delete(`/tables/${id}`, { headers })
-    fetchTables()
+    const table = tables.find(t => t.id === id)
+    setConfirmModal({
+      title: "Eliminar mesa",
+      message: `¿Estás seguro de que quieres eliminar la Mesa ${table?.number ?? ""}? Esta acción no se puede deshacer.`,
+      onConfirm: async () => {
+        await api.delete(`/tables/${id}`, { headers: authHeaders() })
+        setTables(prev => prev.filter(t => t.id !== id))
+        setConfirmModal(null)
+      },
+    })
   }
 
   const handleRemoveItem = async (itemId: string) => {
-    await api.delete(`/orders/items/${itemId}`, { headers })
-    const res = await api.get(`/orders/${activeOrder!.id}`, { headers })
+    await api.delete(`/orders/items/${itemId}`, { headers: authHeaders() })
+    const res = await api.get(`/orders/${activeOrder!.id}`, { headers: authHeaders() })
     setActiveOrder(res.data)
   }
 
-  // ── Helpers para cantidad ──
   const getQty = (productId: string) => quantities[productId] ?? 1
   const changeQty = (productId: string, delta: number) => {
     setQuantities(q => ({ ...q, [productId]: Math.max(1, (q[productId] ?? 1) + delta) }))
+  }
+
+  const handleDrawerClose = () => {
+    if (activeOrder && activeOrder.items && activeOrder.items.length > 0) {
+      setConfirmModal({
+        title: "¿Cerrar sin guardar?",
+        message: "La mesa tiene productos añadidos. ¿Deseas cerrar el panel? La orden quedará abierta y podrás retomar desde la mesa.",
+        onConfirm: () => {
+          setDrawerOpen(false)
+          setActiveOrder(null)
+          setSelectedTable(null)
+          setShowPayment(false)
+          setConfirmModal(null)
+        },
+      })
+    } else {
+      setDrawerOpen(false)
+    }
   }
 
   const subtotal = activeOrder?.total ?? 0
@@ -202,6 +196,7 @@ export default function TablesPage() {
           value={tableSearch}
           onChange={e => setTableSearch(e.target.value)}
           placeholder="Buscar mesa..."
+          aria-label="Buscar mesa por número"
           style={{
             width: "100%", background: "#1c2128", color: "#e6edf3",
             borderRadius: 8, paddingLeft: 34, paddingRight: 14, paddingTop: 8, paddingBottom: 8,
@@ -232,6 +227,7 @@ export default function TablesPage() {
                   </div>
                   <button
                     onClick={(e) => handleDeleteTable(table.id, e)}
+                    aria-label={`Eliminar mesa ${table.number}`}
                     className="text-slate-600 hover:text-red-400 transition-colors"
                   >
                     <Trash2 className="h-4 w-4" />
@@ -254,7 +250,7 @@ export default function TablesPage() {
       {/* Drawer lateral */}
       {drawerOpen && (
         <div className="fixed inset-0 z-50 flex justify-end">
-          <div className="absolute inset-0 bg-black/50" onClick={() => setDrawerOpen(false)} />
+          <div className="absolute inset-0 bg-black/50" onClick={handleDrawerClose} aria-hidden="true" />
 
           <div className="relative w-full max-w-md bg-slate-900 border-l border-slate-700 flex flex-col h-full overflow-hidden">
 
@@ -265,7 +261,11 @@ export default function TablesPage() {
                   {loading ? "Creando orden..." : `Orden #${activeOrder?.id.slice(0, 8)}`}
                 </p>
               </div>
-              <button onClick={() => setDrawerOpen(false)} className="text-slate-400 hover:text-white">
+              <button
+                onClick={handleDrawerClose}
+                aria-label="Cerrar panel de mesa"
+                className="text-slate-400 hover:text-white"
+              >
                 <X className="h-6 w-6" />
               </button>
             </div>
@@ -279,7 +279,7 @@ export default function TablesPage() {
                     Pedido actual
                   </p>
                   <div style={{ background: "#1c2128", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 12, overflow: "hidden" }}>
-                    {activeOrder.items.map((item, i) => (
+                    {activeOrder.items.map((item: OrderItem, i: number) => (
                       <div
                         key={item.id}
                         style={{
@@ -300,6 +300,7 @@ export default function TablesPage() {
                           </span>
                           <button
                             onClick={() => handleRemoveItem(item.id)}
+                            aria-label={`Eliminar ${item.product.name} de la orden`}
                             style={{ color: "#484f58", background: "none", border: "none", cursor: "pointer", display: "flex" }}
                             onMouseEnter={e => (e.currentTarget.style.color = "#f87171")}
                             onMouseLeave={e => (e.currentTarget.style.color = "#484f58")}
@@ -323,7 +324,6 @@ export default function TablesPage() {
                   Agregar productos
                 </p>
 
-                {/* Buscador */}
                 <div style={{ position: "relative", marginBottom: 12 }}>
                   <Search style={{ position: "absolute", left: 11, top: "50%", transform: "translateY(-50%)", width: 14, height: 14, color: "#8b949e" }} />
                   <input
@@ -331,6 +331,7 @@ export default function TablesPage() {
                     value={productSearch}
                     onChange={e => setProductSearch(e.target.value)}
                     placeholder="Buscar por nombre o categoría..."
+                    aria-label="Buscar producto"
                     style={{
                       width: "100%", background: "#161b22", color: "#e6edf3",
                       borderRadius: 8, paddingLeft: 34, paddingRight: 14, paddingTop: 9, paddingBottom: 9,
@@ -340,7 +341,6 @@ export default function TablesPage() {
                   />
                 </div>
 
-                {/* Grid de productos */}
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
                   {filteredProducts.map(product => (
                     <div
@@ -364,6 +364,7 @@ export default function TablesPage() {
                       <div style={{ display: "flex", alignItems: "center", gap: 4, marginTop: 2 }}>
                         <button
                           onClick={() => changeQty(product.id, -1)}
+                          aria-label={`Reducir cantidad de ${product.name}`}
                           style={{
                             background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.08)",
                             color: "#e6edf3", borderRadius: 6, width: 26, height: 26,
@@ -378,6 +379,7 @@ export default function TablesPage() {
                         </span>
                         <button
                           onClick={() => changeQty(product.id, 1)}
+                          aria-label={`Aumentar cantidad de ${product.name}`}
                           style={{
                             background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.08)",
                             color: "#e6edf3", borderRadius: 6, width: 26, height: 26,
@@ -389,6 +391,7 @@ export default function TablesPage() {
                         </button>
                         <button
                           onClick={() => handleAddProduct(product.id, getQty(product.id))}
+                          aria-label={`Agregar ${product.name} a la orden`}
                           style={{
                             flex: 1, background: "rgba(249,115,22,0.15)",
                             border: "1px solid rgba(249,115,22,0.3)",
@@ -424,7 +427,7 @@ export default function TablesPage() {
                   </Button>
                   <Button
                     variant="outline"
-                    onClick={() => setDrawerOpen(false)}
+                    onClick={handleDrawerClose}
                     className="w-full border-slate-600 text-slate-300 hover:bg-slate-800"
                   >
                     <ShoppingBag className="h-5 w-5 mr-2" />
@@ -433,7 +436,6 @@ export default function TablesPage() {
                 </>
               ) : (
                 <>
-                  {/* Método de pago */}
                   <p className="text-slate-400 text-sm font-medium uppercase tracking-wide">
                     Método de pago
                   </p>
@@ -442,6 +444,7 @@ export default function TablesPage() {
                       <button
                         key={method}
                         onClick={() => setPaymentMethod(method)}
+                        aria-pressed={paymentMethod === method}
                         className={`py-3 rounded-xl text-sm font-bold transition-all border-2 ${
                           paymentMethod === method
                             ? 'bg-orange-500 border-orange-500 text-white'
@@ -453,16 +456,14 @@ export default function TablesPage() {
                     ))}
                   </div>
 
-                  {/* Propina */}
                   <div className="bg-slate-800 rounded-xl p-4 space-y-3">
                     <p className="text-slate-400 text-sm font-medium uppercase tracking-wide">Propina</p>
-
-                    {/* Botones rápidos de montos comunes */}
                     <div className="grid grid-cols-4 gap-2">
                       {[0, 2000, 5000, 10000].map(amount => (
                         <button
                           key={amount}
                           onClick={() => setTipAmount(amount)}
+                          aria-pressed={tipAmount === amount}
                           className={`py-2 rounded-lg text-sm font-bold transition-all border ${
                             tipAmount === amount
                               ? 'bg-orange-500 border-orange-500 text-white'
@@ -473,8 +474,6 @@ export default function TablesPage() {
                         </button>
                       ))}
                     </div>
-
-                    {/* Input para monto personalizado */}
                     <div className="flex items-center gap-2">
                       <span className="text-slate-400 text-sm">$</span>
                       <input
@@ -483,11 +482,10 @@ export default function TablesPage() {
                         value={tipAmount === 0 ? '' : tipAmount}
                         onChange={e => setTipAmount(Math.max(0, Number(e.target.value)))}
                         placeholder="Monto personalizado"
+                        aria-label="Monto de propina personalizado"
                         className="w-full bg-slate-700 text-white rounded-lg px-3 py-2 text-sm border border-slate-600 focus:border-orange-500 outline-none placeholder:text-slate-500"
                       />
                     </div>
-
-                    {/* Desglose */}
                     <div className="space-y-1 pt-1 border-t border-slate-700">
                       <div className="flex justify-between text-sm">
                         <span className="text-slate-400">Subtotal</span>
@@ -521,6 +519,53 @@ export default function TablesPage() {
                   </Button>
                 </>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal de confirmación genérico ─────────────────────── */}
+      {confirmModal && (
+        <div style={{
+          position: "fixed", inset: 0, zIndex: 100,
+          background: "rgba(0,0,0,0.6)",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          padding: 20,
+        }}>
+          <div className="scale-in" style={{
+            background: "#161b22",
+            border: "1px solid rgba(255,255,255,0.08)",
+            borderRadius: 14, width: "100%", maxWidth: 400, padding: 24,
+          }}>
+            <h3 style={{ fontWeight: 700, fontSize: 16, color: "#e6edf3", marginBottom: 10 }}>
+              {confirmModal.title}
+            </h3>
+            <p style={{ color: "#8b949e", fontSize: 14, lineHeight: 1.6, marginBottom: 20 }}>
+              {confirmModal.message}
+            </p>
+            <div style={{ display: "flex", gap: 10 }}>
+              <button
+                onClick={() => setConfirmModal(null)}
+                style={{
+                  flex: 1, padding: "10px", borderRadius: 9,
+                  background: "transparent",
+                  border: "1px solid rgba(255,255,255,0.08)",
+                  color: "#8b949e", fontWeight: 600, fontSize: 14, cursor: "pointer",
+                }}
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={confirmModal.onConfirm}
+                style={{
+                  flex: 1, padding: "10px", borderRadius: 9,
+                  background: "rgba(248,113,113,0.15)",
+                  border: "1px solid rgba(248,113,113,0.25)",
+                  color: "#f87171", fontWeight: 700, fontSize: 14, cursor: "pointer",
+                }}
+              >
+                Confirmar
+              </button>
             </div>
           </div>
         </div>

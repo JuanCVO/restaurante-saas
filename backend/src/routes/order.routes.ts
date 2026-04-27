@@ -1,4 +1,4 @@
-import { Router } from 'express'
+import { Router } from "express"
 import {
   createOrder,
   getOrderById,
@@ -8,22 +8,22 @@ import {
   removeItemFromOrder,
   getOrderHistory,
   getDashboardStats
-} from '../controllers/order.controller'
-import { authMiddleware } from '../middlewares/auth.middleware'
+} from "../controllers/order.controller"
+import { authMiddleware } from "../middlewares/auth.middleware"
+import { sameRestaurant } from "../middlewares/tenant.middleware"
 
 const router = Router()
 
-router.post('/', authMiddleware, createOrder)
+router.post("/", authMiddleware, sameRestaurant, createOrder)
 
-router.get('/history/:restaurantId', authMiddleware, getOrderHistory)
-router.get('/stats/:restaurantId', authMiddleware, getDashboardStats)
-router.get('/table/:tableId', authMiddleware, getActiveOrderByTable)
+router.get("/history/:restaurantId", authMiddleware, sameRestaurant, getOrderHistory)
+router.get("/stats/:restaurantId", authMiddleware, sameRestaurant, getDashboardStats)
+router.get("/table/:tableId", authMiddleware, getActiveOrderByTable)
 
+router.get("/:id", authMiddleware, getOrderById)
 
-router.get('/:id', authMiddleware, getOrderById)
-
-router.post('/:id/items', authMiddleware, addItemToOrder)
-router.patch('/:id/close', authMiddleware, closeOrder)
-router.delete('/items/:itemId', authMiddleware, removeItemFromOrder)
+router.post("/:id/items", authMiddleware, addItemToOrder)
+router.patch("/:id/close", authMiddleware, closeOrder)
+router.delete("/items/:itemId", authMiddleware, removeItemFromOrder)
 
 export default router

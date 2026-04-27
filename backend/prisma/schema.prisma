@@ -38,6 +38,8 @@ model User {
 
   orders           Order[]
   employeePayments EmployeePayment[]
+
+  @@index([restaurantId])
 }
 
 enum Role {
@@ -52,6 +54,8 @@ model Category {
   restaurant   Restaurant @relation(fields: [restaurantId], references: [id])
 
   products Product[]
+
+  @@index([restaurantId])
 }
 
 model Product {
@@ -68,6 +72,9 @@ model Product {
   createdAt    DateTime   @default(now())
 
   orderItems OrderItem[]
+
+  @@index([restaurantId])
+  @@index([categoryId])
 }
 
 model Table {
@@ -79,6 +86,8 @@ model Table {
   orders       Order[]
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+
+  @@index([restaurantId])
 }
 
 enum TableStatus {
@@ -96,11 +105,15 @@ model Order {
   restaurant   Restaurant  @relation(fields: [restaurantId], references: [id])
   userId       String
   user         User        @relation(fields: [userId], references: [id])
-  tableId      String?                                          
-  table        Table?      @relation(fields: [tableId], references: [id]) 
+  tableId      String?
+  table        Table?      @relation(fields: [tableId], references: [id], onDelete: SetNull)
   createdAt    DateTime    @default(now())
 
   items OrderItem[]
+
+  @@index([restaurantId, status, createdAt])
+  @@index([tableId, status])
+  @@index([userId])
 }
 
 enum OrderStatus {
@@ -117,7 +130,10 @@ model OrderItem {
   productId String
   product   Product @relation(fields: [productId], references: [id])
   orderId   String
-  order     Order   @relation(fields: [orderId], references: [id])
+  order     Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@index([productId])
 }
 
 model DailySummary {
@@ -145,11 +161,14 @@ model CashMovement {
   type           MovementType
   concept        String
   amount         Float
-  paymentMethod  String? 
+  paymentMethod  String?
   notes          String?
   restaurantId   String
   restaurant     Restaurant      @relation(fields: [restaurantId], references: [id])
   createdAt      DateTime        @default(now())
+
+  @@index([restaurantId, type, createdAt])
+  @@index([restaurantId, createdAt])
 }
 
 enum MovementType {
@@ -168,4 +187,7 @@ model EmployeePayment {
   tip          Float      @default(0)
   notes        String?
   createdAt    DateTime   @default(now())
+
+  @@index([restaurantId, createdAt])
+  @@index([userId])
 }

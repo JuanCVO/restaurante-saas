@@ -1,131 +1,136 @@
-import { Request, Response } from 'express'
-import bcrypt from 'bcryptjs'
-import jwt from 'jsonwebtoken'
-import { prisma } from '../lib/prisma'
-import { Role } from '@prisma/client'
+import { Request, Response } from "express"
+import bcrypt from "bcryptjs"
+import jwt from "jsonwebtoken"
+import { prisma } from "../lib/prisma"
+import { env } from "../lib/env"
+import { LoginSchema, RegisterSchema, CreateEmployeeSchema } from "../lib/validators"
+import { asyncHandler } from "../lib/asyncHandler"
+import { BusinessError } from "../lib/errors"
 
-export const register = async (req: Request, res: Response) => {
-  try {
-    const { name, email, password, restaurantId , role} = req.body
+const TOKEN_EXPIRES_IN = "8h"
+const BCRYPT_ROUNDS = 12
 
-    const existingUser = await prisma.user.findUnique({ where: { email } })
-    if (existingUser) {
-       res.status(400).json({ message: 'El email ya está registrado' })
-       return
-    }
+const signToken = (userId: string, role: "ADMIN" | "EMPLOYEE", restaurantId: string) =>
+  jwt.sign({ userId, role, restaurantId }, env.jwtSecret, { expiresIn: TOKEN_EXPIRES_IN })
 
-    const hashedPassword = await bcrypt.hash(password, 10)
+const findUserByEmailInsensitive = (email: string) =>
+  prisma.user.findFirst({ where: { email: { equals: email, mode: "insensitive" } } })
 
-    const user = await prisma.user.create({
-      data: { name, email, password: hashedPassword, restaurantId , role}
+export const register = asyncHandler(async (req: Request, res: Response) => {
+  const data = RegisterSchema.parse(req.body)
 
-    })
+  const existing = await findUserByEmailInsensitive(data.email)
+  if (existing) throw new BusinessError("EMAIL_TAKEN", 400)
 
-    const token = jwt.sign(
-      { userId: user.id, role: user.role },
-      process.env.JWT_SECRET as string,
-      { expiresIn: '7d' }
-    )
+  const user = await prisma.user.create({
+    data: {
+      name: data.name,
+      email: data.email,
+      password: await bcrypt.hash(data.password, BCRYPT_ROUNDS),
+      restaurantId: data.restaurantId,
+      role: "EMPLOYEE",
+    },
+  })
 
-    res.status(201).json({
-      token,
-      user: { id: user.id, name: user.name, email: user.email, role: user.role as Role, restaurantId: user.restaurantId}
-    })
-  } catch (error) {
-    res.status(500).json({ message: 'Error al registrar usuario' })
+  const token = signToken(user.id, user.role, user.restaurantId)
+
+  return res.status(201).json({
+    token,
+    user: {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      restaurantId: user.restaurantId,
+    },
+  })
+})
+
+export const createEmployee = asyncHandler(async (req: Request, res: Response) => {
+  const data = CreateEmployeeSchema.parse(req.body)
+  const adminUser = req.user
+  if (!adminUser) throw new BusinessError("FORBIDDEN", 401)
+
+  const admin = await prisma.user.findUnique({ where: { id: adminUser.userId } })
+  if (!admin) throw new BusinessError("RESOURCE_NOT_FOUND", 404)
+
+  const existing = await findUserByEmailInsensitive(data.email)
+  if (existing) throw new BusinessError("EMAIL_TAKEN", 400)
+
+  const user = await prisma.user.create({
+    data: {
+      name: data.name,
+      email: data.email,
+      password: await bcrypt.hash(data.password, BCRYPT_ROUNDS),
+      restaurantId: admin.restaurantId,
+      role: "EMPLOYEE",
+    },
+  })
+
+  return res.status(201).json({
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    role: user.role,
+    createdAt: user.createdAt,
+  })
+})
+
+export const listUsers = asyncHandler(async (req: Request, res: Response) => {
+  const restaurantId = req.params.restaurantId as string
+  const users = await prisma.user.findMany({
+    where: { restaurantId },
+    select: { id: true, name: true, email: true, role: true, createdAt: true },
+    orderBy: { createdAt: "asc" },
+  })
+  return res.json(users)
+})
+
+export const deleteUser = asyncHandler(async (req: Request, res: Response) => {
+  const userId = req.params.userId as string
+  const adminUser = req.user
+  if (!adminUser) throw new BusinessError("FORBIDDEN", 401)
+
+  if (userId === adminUser.userId) {
+    return res.status(400).json({ message: "No puedes eliminarte a ti mismo" })
   }
-}
 
-export const createEmployee = async (req: Request, res: Response) => {
-  try {
-    const adminUser = (req as any).user
-    const { name, email, password } = req.body
-
-    const admin = await prisma.user.findUnique({ where: { id: adminUser.userId } })
-    if (!admin) return res.status(404).json({ message: 'Admin no encontrado' })
-
-    const existing = await prisma.user.findUnique({ where: { email } })
-    if (existing) return res.status(400).json({ message: 'El email ya está registrado' })
-
-    const hashedPassword = await bcrypt.hash(password, 10)
-    const user = await prisma.user.create({
-      data: { name, email, password: hashedPassword, restaurantId: admin.restaurantId, role: 'EMPLOYEE' },
-    })
-
-    return res.status(201).json({ id: user.id, name: user.name, email: user.email, role: user.role, createdAt: user.createdAt })
-  } catch (error) {
-    return res.status(500).json({ message: 'Error al crear el empleado' })
+  const target = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { restaurantId: true },
+  })
+  if (!target) throw new BusinessError("RESOURCE_NOT_FOUND", 404)
+  if (target.restaurantId !== adminUser.restaurantId) {
+    throw new BusinessError("FORBIDDEN", 403)
   }
-}
 
-export const listUsers = async (req: Request, res: Response) => {
-  try {
-    const restaurantId = req.params.restaurantId as string
-    const users = await prisma.user.findMany({
-      where: { restaurantId },
-      select: { id: true, name: true, email: true, role: true, createdAt: true },
-      orderBy: { createdAt: 'asc' },
-    })
-    return res.json(users)
-  } catch (error) {
-    return res.status(500).json({ message: 'Error al obtener los usuarios' })
-  }
-}
+  await prisma.user.delete({ where: { id: userId } })
+  return res.json({ message: "Usuario eliminado" })
+})
 
-export const deleteUser = async (req: Request, res: Response) => {
-  try {
-    const userId = req.params.userId as string
-    const adminUser = (req as any).user
+export const login = asyncHandler(async (req: Request, res: Response) => {
+  const data = LoginSchema.parse(req.body)
 
-    if (userId === adminUser.userId) {
-      return res.status(400).json({ message: 'No puedes eliminarte a ti mismo' })
-    }
+  const user = await prisma.user.findFirst({
+    where: { email: { equals: data.email, mode: "insensitive" } },
+    include: { restaurant: { select: { name: true } } },
+  })
+  if (!user) throw new BusinessError("INVALID_CREDENTIALS", 401)
 
-    await prisma.user.delete({ where: { id: userId } })
-    return res.json({ message: 'Usuario eliminado' })
-  } catch (error) {
-    return res.status(500).json({ message: 'Error al eliminar el usuario' })
-  }
-}
+  const isValidPassword = await bcrypt.compare(data.password, user.password)
+  if (!isValidPassword) throw new BusinessError("INVALID_CREDENTIALS", 401)
 
-export const login = async (req: Request, res: Response) => {
-  try {
-    const { email, password } = req.body
+  const token = signToken(user.id, user.role, user.restaurantId)
 
-    const user = await prisma.user.findUnique({
-      where: { email },
-      include: { restaurant: { select: { name: true } } },
-    })
-
-    if (!user) {
-      res.status(401).json({ message: 'Credenciales inválidas' })
-      return
-    }
-
-    const isValidPassword = await bcrypt.compare(password, user.password)
-    if (!isValidPassword) {
-      res.status(401).json({ message: 'Credenciales inválidas' })
-      return
-    }
-
-    const token = jwt.sign(
-      { userId: user.id, role: user.role },
-      process.env.JWT_SECRET as string,
-      { expiresIn: '7d' }
-    )
-
-    res.json({
-      token,
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        restaurantId: user.restaurantId,
-        restaurantName: user.restaurant?.name,
-      },
-    })
-  } catch (error) {
-    res.status(500).json({ message: 'Error al iniciar sesión' })
-  }
-}
+  return res.json({
+    token,
+    user: {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      restaurantId: user.restaurantId,
+      restaurantName: user.restaurant?.name,
+    },
+  })
+})

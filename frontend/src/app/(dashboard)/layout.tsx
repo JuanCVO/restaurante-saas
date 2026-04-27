@@ -3,31 +3,31 @@
 import { useEffect } from "react"
 import { useRouter, usePathname } from "next/navigation"
 import Sidebar from "@/components/ui/layout/Sidebar"
+import { useCurrentUser } from "@/lib/auth"
 
 const ADMIN_ONLY = ["/dashboard", "/inventory", "/purchases", "/employees"]
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const router   = useRouter()
   const pathname = usePathname()
+  const { user, token, ready } = useCurrentUser()
 
   useEffect(() => {
-    const token = localStorage.getItem("token")
+    if (!ready) return
     if (!token) {
       router.replace("/login")
       return
     }
-
-    const user = JSON.parse(localStorage.getItem("user") || "{}")
-    if (user.role === "EMPLOYEE") {
+    if (user?.role === "EMPLOYEE") {
       const blocked = ADMIN_ONLY.some(p => pathname.startsWith(p))
       if (blocked) router.replace("/tables")
     }
-  }, [pathname])
+  }, [ready, token, user, pathname, router])
 
   return (
     <div style={{ display: "flex", height: "100vh", overflow: "hidden" }}>
       <Sidebar />
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+      <div className="flex-1 flex flex-col overflow-hidden md:pt-0 pt-14">
         {children}
       </div>
     </div>

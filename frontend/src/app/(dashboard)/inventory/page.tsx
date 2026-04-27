@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react"
 import { Package, Plus, Search, AlertTriangle, Pencil, Trash2, X } from "lucide-react"
 import api from "@/lib/axios"
+import { useCurrentUser, authHeaders } from "@/lib/auth"
 import TopBar from "@/components/ui/layout/TopBar"
 
 // ── Tipos ────────────────────────────────────────────────────
@@ -69,8 +70,7 @@ export default function InventoryPage() {
   const [editing,     setEditing]     = useState<Product | null>(null)
   const [delTarget,   setDelTarget]   = useState<Product | null>(null)
   const [saving,      setSaving]      = useState(false)
-  const [restaurantId, setRestaurantId] = useState("")
-  const [token,       setToken]       = useState("")
+  const { token, restaurantId } = useCurrentUser()
 
   const FORM_INIT: ProductForm = {
     name: "", price: "", unit: "unidades",
@@ -78,18 +78,10 @@ export default function InventoryPage() {
   }
   const [form, setForm] = useState<ProductForm>(FORM_INIT)
 
-  // Leer auth
-  useEffect(() => {
-    const user = JSON.parse(localStorage.getItem("user") || "{}")
-    const t    = localStorage.getItem("token") || ""
-    if (user.restaurantId) setRestaurantId(user.restaurantId)
-    setToken(t)
-  }, [])
-
   // Fetch datos
   useEffect(() => {
     if (!restaurantId || !token) return
-    const headers = { Authorization: `Bearer ${token}` }
+    const headers = authHeaders()
 
     api.get(`/products/${restaurantId}`, { headers })
       .then(r => setProducts(r.data))
@@ -99,7 +91,7 @@ export default function InventoryPage() {
   }, [restaurantId, token])
 
   // ── Helpers ─────────────────────────────────────────────
-  const headers = { Authorization: `Bearer ${token}` }
+  const headers = authHeaders()
 
   const lowStock  = products.filter(p => p.stock <= p.minStock && p.stock > 0)
   const emptyStock = products.filter(p => p.stock === 0)

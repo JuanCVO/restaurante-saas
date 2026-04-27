@@ -1,18 +1,7 @@
 import { Request, Response } from "express";
 import { prisma } from "../lib/prisma";
 import PDFDocument from "pdfkit";
-
-const getColombiaDayRange = () => {
-  const now = new Date()
-  const colombiaOffset = -5 * 60 * 60 * 1000
-  const nowColombia = new Date(now.getTime() + colombiaOffset)
-  const startOfDayColombia = new Date(
-    Date.UTC(nowColombia.getUTCFullYear(), nowColombia.getUTCMonth(), nowColombia.getUTCDate(), 0, 0, 0, 0)
-  )
-  const today = new Date(startOfDayColombia.getTime() - colombiaOffset)
-  const tomorrow = new Date(today.getTime() + 24 * 60 * 60 * 1000)
-  return { today, tomorrow }
-}
+import { getColombiaDayRange } from "../lib/date";
 
 const col = (v: number) => `$${v.toLocaleString("es-CO")}`
 

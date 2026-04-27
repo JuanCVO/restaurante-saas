@@ -1,263 +1,198 @@
-import { Request, Response } from 'express'
-import { PrismaClient } from '@prisma/client'
+import { Request, Response } from "express"
+import { prisma } from "../lib/prisma"
+import { CreateOrderSchema, AddItemSchema, CloseOrderSchema } from "../lib/validators"
+import { asyncHandler } from "../lib/asyncHandler"
+import { BusinessError } from "../lib/errors"
 
-const prisma = new PrismaClient()
+export const createOrder = asyncHandler(async (req: Request, res: Response) => {
+  const data = CreateOrderSchema.parse(req.body)
+  const userId = req.user?.userId
+  if (!userId) throw new BusinessError("FORBIDDEN", 401)
 
-export const createOrder = async (req: Request, res: Response) => {
-  try {
-    const { tableId, restaurantId } = req.body
-    const userId = (req as any).user.userId
+  const order = await prisma.order.create({
+    data: {
+      tableId: data.tableId ?? null,
+      restaurantId: data.restaurantId,
+      userId,
+      total: 0,
+      status: "ABIERTA",
+    },
+  })
 
-    const order = await prisma.order.create({
-      data: {
-        tableId,
-        restaurantId,
-        userId,
-        total: 0,
-        status: 'ABIERTA',
-      },
-    })
+  return res.status(201).json(order)
+})
 
-    res.status(201).json(order)
-  } catch (error) {
-    res.status(500).json({ message: 'Error al crear orden' })
+export const getOrderById = asyncHandler(async (req: Request, res: Response) => {
+  const id = req.params.id as string
+  const order = await prisma.order.findUnique({
+    where: { id },
+    include: { items: { include: { product: true } }, table: true },
+  })
+  if (!order) throw new BusinessError("ORDER_NOT_FOUND", 404)
+  if (order.restaurantId !== req.user?.restaurantId) {
+    throw new BusinessError("FORBIDDEN", 403)
   }
-}
+  return res.json(order)
+})
 
-export const getOrderById = async (req: Request, res: Response) => {
-  try {
-    const id = req.params.id as string
-    const order = await prisma.order.findUnique({
-      where: { id },
-      include: {
-        items: { include: { product: true } },
-        table: true,
-      },
-    })
-    if (!order) {
-      res.status(404).json({ message: 'Orden no encontrada' })
-      return
+export const getActiveOrderByTable = asyncHandler(async (req: Request, res: Response) => {
+  const tableId = req.params.tableId as string
+  const order = await prisma.order.findFirst({
+    where: { tableId, status: "ABIERTA" },
+    include: { items: { include: { product: true } } },
+  })
+  if (order && order.restaurantId !== req.user?.restaurantId) {
+    throw new BusinessError("FORBIDDEN", 403)
+  }
+  return res.json(order)
+})
+
+export const addItemToOrder = asyncHandler(async (req: Request, res: Response) => {
+  const id = req.params.id as string
+  const { productId, quantity } = AddItemSchema.parse(req.body)
+
+  const order = await prisma.order.findUnique({
+    where: { id },
+    select: { restaurantId: true, tableId: true },
+  })
+  if (!order) throw new BusinessError("ORDER_NOT_FOUND", 404)
+  if (order.restaurantId !== req.user?.restaurantId) {
+    throw new BusinessError("FORBIDDEN", 403)
+  }
+
+  const item = await prisma.$transaction(async (tx) => {
+    const product = await tx.product.findUnique({ where: { id: productId } })
+    if (!product) throw new BusinessError("PRODUCT_NOT_FOUND", 404)
+    if (product.restaurantId !== order.restaurantId) {
+      throw new BusinessError("PRODUCT_FOREIGN", 403)
     }
-    res.json(order)
-  } catch (error) {
-    res.status(500).json({ message: 'Error al obtener orden' })
-  }
-}
-
-export const getActiveOrderByTable = async (req: Request, res: Response) => {
-  try {
-    const tableId = req.params.tableId as string
-    const order = await prisma.order.findFirst({
-      where: { tableId, status: 'ABIERTA' },
-      include: {
-        items: { include: { product: true } },
-      },
-    })
-    res.json(order)
-  } catch (error) {
-    res.status(500).json({ message: 'Error al obtener orden de la mesa' })
-  }
-}
-
-export const addItemToOrder = async (req: Request, res: Response) => {
-  try {
-    const id = req.params.id as string
-    const { productId, quantity } = req.body
-
-    const product = await prisma.product.findUnique({ where: { id: productId } })
-    if (!product) {
-      res.status(404).json({ message: 'Producto no encontrado' })
-      return
-    }
-
     if (product.stock < quantity) {
-      res.status(400).json({ message: `Stock insuficiente. Disponible: ${product.stock}` })
-      return
+      throw new BusinessError("INSUFFICIENT_STOCK", 400, { available: product.stock })
     }
 
-    const existingItem = await prisma.orderItem.findFirst({
-      where: { orderId: id, productId },
-    })
+    const existing = await tx.orderItem.findFirst({ where: { orderId: id, productId } })
 
-    let item
-    if (existingItem) {
-      item = await prisma.orderItem.update({
-        where: { id: existingItem.id },
-        data: { quantity: { increment: quantity } },
-        include: { product: true },
-      })
-    } else {
-      item = await prisma.orderItem.create({
-        data: { orderId: id, productId, quantity, unitPrice: product.price },
-        include: { product: true },
-      })
-    }
+    const saved = existing
+      ? await tx.orderItem.update({
+          where: { id: existing.id },
+          data: { quantity: { increment: quantity } },
+          include: { product: true },
+        })
+      : await tx.orderItem.create({
+          data: { orderId: id, productId, quantity, unitPrice: product.price },
+          include: { product: true },
+        })
 
-    await prisma.product.update({
+    await tx.product.update({
       where: { id: productId },
       data: { stock: { decrement: quantity } },
     })
 
-    const allItems = await prisma.orderItem.findMany({ where: { orderId: id } })
+    const allItems = await tx.orderItem.findMany({ where: { orderId: id } })
     const total = allItems.reduce((sum, i) => sum + i.unitPrice * i.quantity, 0)
-    await prisma.order.update({ where: { id }, data: { total } })
-
-    await prisma.table.update({
-      where: { id: (await prisma.order.findUnique({ where: { id }, select: { tableId: true } }))?.tableId ?? '' },
-      data: { status: 'OCUPADA' },
-    })
-
-    res.status(201).json(item)
-  } catch (error) {
-    res.status(500).json({ message: 'Error al agregar ítem' })
-  }
-}
-
-export const closeOrder = async (req: Request, res: Response) => {
-  try {
-    const id = req.params.id as string
-    const { paymentMethod, tip = 0 } = req.body
-
-    const order = await prisma.order.update({
-      where: { id },
-      data: { status: 'CERRADA', paymentMethod, tip },
-      include: { items: { include: { product: true } }, table: true },
-    })
+    await tx.order.update({ where: { id }, data: { total } })
 
     if (order.tableId) {
-      await prisma.table.update({
-        where: { id: order.tableId },
-        data: { status: 'DISPONIBLE' },
-      })
+      await tx.table.update({ where: { id: order.tableId }, data: { status: "OCUPADA" } })
     }
 
-    const today = new Date()
-    today.setHours(0, 0, 0, 0)
+    return saved
+  })
 
-    const paymentField =
-      paymentMethod === 'Efectivo' ? 'efectivo'
-      : paymentMethod === 'Datafono' ? 'datafono'
-      : 'nequi'
+  return res.status(201).json(item)
+})
 
-    const totalConPropina = order.total + tip
+export const closeOrder = asyncHandler(async (req: Request, res: Response) => {
+  const id = req.params.id as string
+  const { paymentMethod, tip = 0 } = CloseOrderSchema.parse(req.body)
 
-    await prisma.dailySummary.upsert({
-      where: {
-        restaurantId_date: {
-          restaurantId: order.restaurantId,
-          date: today,
-        },
-      },
-      update: {
-        totalIngresos:  { increment: totalConPropina },
-        totalOrdenes:   { increment: 1 },
-        totalPlatos:    { increment: order.items.reduce((s, i) => s + i.quantity, 0) },
-        totalPropinas:  { increment: tip },
-        [paymentField]: { increment: totalConPropina },
-      },
-      create: {
-        date: today,
-        restaurantId: order.restaurantId,
-        totalIngresos: totalConPropina,
-        totalOrdenes: 1,
-        totalPlatos: order.items.reduce((s, i) => s + i.quantity, 0),
-        totalPropinas: tip,
-        efectivo:  paymentMethod === 'Efectivo'  ? totalConPropina : 0,
-        datafono:  paymentMethod === 'Datafono'  ? totalConPropina : 0,
-        nequi:     paymentMethod === 'Nequi'     ? totalConPropina : 0,
-      },
-    })
-
-    return res.json(order)
-  } catch (error) {
-    console.error(error)
-    return res.status(500).json({ message: 'Error al cerrar la orden' })
+  const existing = await prisma.order.findUnique({
+    where: { id },
+    select: { restaurantId: true, status: true },
+  })
+  if (!existing) throw new BusinessError("ORDER_NOT_FOUND", 404)
+  if (existing.restaurantId !== req.user?.restaurantId) {
+    throw new BusinessError("FORBIDDEN", 403)
   }
-}
+  if (existing.status !== "ABIERTA") throw new BusinessError("ORDER_NOT_OPEN", 409)
 
-export const removeItemFromOrder = async (req: Request, res: Response) => {
-  try {
-    const itemId = req.params.itemId as string
-
-    const item = await prisma.orderItem.delete({
-      where: { id: itemId },
+  const order = await prisma.$transaction(async (tx) => {
+    const updated = await tx.order.update({
+      where: { id },
+      data: { status: "CERRADA", paymentMethod, tip },
+      include: { items: { include: { product: true } }, table: true },
     })
+    if (updated.tableId) {
+      await tx.table.update({
+        where: { id: updated.tableId },
+        data: { status: "DISPONIBLE" },
+      })
+    }
+    return updated
+  })
 
-    await prisma.product.update({
+  return res.json(order)
+})
+
+export const removeItemFromOrder = asyncHandler(async (req: Request, res: Response) => {
+  const itemId = req.params.itemId as string
+
+  const item = await prisma.orderItem.findUnique({
+    where: { id: itemId },
+    include: { order: { select: { restaurantId: true } } },
+  })
+  if (!item) throw new BusinessError("RESOURCE_NOT_FOUND", 404)
+  if (item.order.restaurantId !== req.user?.restaurantId) {
+    throw new BusinessError("FORBIDDEN", 403)
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.orderItem.delete({ where: { id: itemId } })
+    await tx.product.update({
       where: { id: item.productId },
       data: { stock: { increment: item.quantity } },
     })
-
-    const allItems = await prisma.orderItem.findMany({ where: { orderId: item.orderId } })
+    const allItems = await tx.orderItem.findMany({ where: { orderId: item.orderId } })
     const total = allItems.reduce((sum, i) => sum + i.unitPrice * i.quantity, 0)
-    await prisma.order.update({ where: { id: item.orderId }, data: { total } })
+    await tx.order.update({ where: { id: item.orderId }, data: { total } })
+  })
 
-    res.json({ message: 'Ítem eliminado' })
-  } catch (error) {
-    res.status(500).json({ message: 'Error al eliminar ítem' })
-  }
-}
+  return res.json({ message: "Ítem eliminado" })
+})
 
-export const getOrderHistory = async (req: Request, res: Response) => {
-  try {
-    const restaurantId = req.params.restaurantId as string
-    const orders = await prisma.order.findMany({
-      where: { restaurantId, status: 'CERRADA' },
-      orderBy: { createdAt: 'desc' },
-      take: 20,
-      include: {
-        table: true,
-        items: { include: { product: true } },
-      },
-    })
-    res.json(orders)
-  } catch (error) {
-    res.status(500).json({ message: 'Error al obtener historial' })
-  }
-}
+export const getOrderHistory = asyncHandler(async (req: Request, res: Response) => {
+  const restaurantId = req.params.restaurantId as string
+  const orders = await prisma.order.findMany({
+    where: { restaurantId, status: "CERRADA" },
+    orderBy: { createdAt: "desc" },
+    take: 20,
+    include: { table: true, items: { include: { product: true } } },
+  })
+  return res.json(orders)
+})
 
-export const getDashboardStats = async (req: Request, res: Response) => {
-  try {
-    const restaurantId = req.params.restaurantId as string
+export const getDashboardStats = asyncHandler(async (req: Request, res: Response) => {
+  const restaurantId = req.params.restaurantId as string
 
-    const startOfDay = new Date()
-    startOfDay.setHours(0, 0, 0, 0)
+  const startOfDay = new Date()
+  startOfDay.setHours(0, 0, 0, 0)
 
-    const ordersToday = await prisma.order.findMany({
-      where: {
-        restaurantId,
-        status: 'CERRADA',
-        createdAt: { gte: startOfDay },
-      },
-      include: { items: true },
-    })
+  const ordersToday = await prisma.order.findMany({
+    where: { restaurantId, status: "CERRADA", createdAt: { gte: startOfDay } },
+    include: { items: { select: { quantity: true } } },
+  })
+  const tables = await prisma.table.findMany({ where: { restaurantId } })
 
-    const tables = await prisma.table.findMany({ where: { restaurantId } })
+  const totalIngresos = ordersToday.reduce((sum, o) => sum + o.total, 0)
+  const totalPropinas = ordersToday.reduce((sum, o) => sum + (o.tip ?? 0), 0)
 
-    // Solo ventas de productos (sin propina)
-    const totalIngresos = ordersToday.reduce((sum, o) => sum + o.total, 0)
-
-    // Solo propinas
-    const totalPropinas = ordersToday.reduce((sum, o) => sum + (o.tip ?? 0), 0)
-
-    // Total real que entró en caja
-    const totalRecibido = totalIngresos + totalPropinas
-
-    const totalPedidos  = ordersToday.length
-    const totalPlatos   = ordersToday.reduce((sum, o) => sum + o.items.reduce((s, i) => s + i.quantity, 0), 0)
-    const mesasOcupadas = tables.filter(t => t.status === 'OCUPADA').length
-    const totalMesas    = tables.length
-
-    res.json({
-      totalIngresos,
-      totalPropinas,
-      totalRecibido,
-      totalPedidos,
-      totalPlatos,
-      mesasOcupadas,
-      totalMesas,
-    })
-  } catch (error) {
-    res.status(500).json({ message: 'Error al obtener stats' })
-  }
-}
+  return res.json({
+    totalIngresos,
+    totalPropinas,
+    totalRecibido: totalIngresos + totalPropinas,
+    totalPedidos:  ordersToday.length,
+    totalPlatos:   ordersToday.reduce((sum, o) => sum + o.items.reduce((s, i) => s + i.quantity, 0), 0),
+    mesasOcupadas: tables.filter(t => t.status === "OCUPADA").length,
+    totalMesas:    tables.length,
+  })
+})

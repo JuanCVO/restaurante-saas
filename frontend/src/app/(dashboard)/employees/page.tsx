@@ -3,43 +3,37 @@
 import { useEffect, useState } from "react"
 import { Users, Plus, Trash2, X, Loader2, Shield, UserCheck } from "lucide-react"
 import api from "@/lib/axios"
+import { useCurrentUser, authHeaders } from "@/lib/auth"
 import TopBar from "@/components/ui/layout/TopBar"
 
-type Employee = {
-  id: string
-  name: string
-  email: string
-  role: "ADMIN" | "EMPLOYEE"
-  createdAt: string
-}
+import type { Employee } from "@/types/api"
 
 type FormState = "idle" | "loading" | "error"
 
+type ConfirmModal = {
+  employeeId: string
+  employeeName: string
+}
+
 export default function EmployeesPage() {
-  const [employees, setEmployees]   = useState<Employee[]>([])
-  const [loading, setLoading]       = useState(true)
-  const [showForm, setShowForm]     = useState(false)
-  const [formState, setFormState]   = useState<FormState>("idle")
-  const [formError, setFormError]   = useState("")
-  const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [employees, setEmployees]     = useState<Employee[]>([])
+  const [loading, setLoading]         = useState(true)
+  const [showForm, setShowForm]       = useState(false)
+  const [formState, setFormState]     = useState<FormState>("idle")
+  const [formError, setFormError]     = useState("")
+  const [deletingId, setDeletingId]   = useState<string | null>(null)
+  const [confirmModal, setConfirmModal] = useState<ConfirmModal | null>(null)
 
   const [name, setName]         = useState("")
   const [email, setEmail]       = useState("")
   const [password, setPassword] = useState("")
 
-  const getAuth = () => {
-    const token = localStorage.getItem("token") || ""
-    const user  = JSON.parse(localStorage.getItem("user") || "{}")
-    return { token, restaurantId: user?.restaurantId || "" }
-  }
+  const { restaurantId } = useCurrentUser()
 
   const fetchEmployees = async () => {
-    const { token, restaurantId } = getAuth()
     if (!restaurantId) return
     try {
-      const res = await api.get(`/auth/users/${restaurantId}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      })
+      const res = await api.get(`/auth/users/${restaurantId}`, { headers: authHeaders() })
       setEmployees(res.data)
     } catch {
       // silencioso
@@ -48,7 +42,7 @@ export default function EmployeesPage() {
     }
   }
 
-  useEffect(() => { fetchEmployees() }, [])
+  useEffect(() => { fetchEmployees() }, [restaurantId])
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -58,11 +52,10 @@ export default function EmployeesPage() {
     setFormError("")
 
     try {
-      const { token } = getAuth()
       await api.post(
         "/auth/employees",
         { name, email, password },
-        { headers: { Authorization: `Bearer ${token}` } }
+        { headers: authHeaders() }
       )
       setName("")
       setEmail("")
@@ -76,15 +69,18 @@ export default function EmployeesPage() {
     }
   }
 
-  const handleDelete = async (userId: string) => {
-    if (!confirm("¿Eliminar este empleado?")) return
-    setDeletingId(userId)
+  const handleDeleteRequest = (emp: Employee) => {
+    setConfirmModal({ employeeId: emp.id, employeeName: emp.name })
+  }
+
+  const handleDeleteConfirmed = async () => {
+    if (!confirmModal) return
+    const { employeeId } = confirmModal
+    setConfirmModal(null)
+    setDeletingId(employeeId)
     try {
-      const { token } = getAuth()
-      await api.delete(`/auth/users/${userId}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      })
-      setEmployees(prev => prev.filter(e => e.id !== userId))
+      await api.delete(`/auth/users/${employeeId}`, { headers: authHeaders() })
+      setEmployees(prev => prev.filter(e => e.id !== employeeId))
     } catch (err: any) {
       alert(err?.response?.data?.message || "Error al eliminar")
     } finally {
@@ -159,7 +155,7 @@ export default function EmployeesPage() {
 
           {loading ? (
             <div style={{ padding: 40, textAlign: "center" }}>
-              <Loader2 size={28} color="#f97316" style={{ animation: "spin 1s linear infinite", margin: "0 auto" }} />
+              <Loader2 size={28} color="#f97316" className="animate-spin" style={{ margin: "0 auto" }} />
             </div>
           ) : employees.length === 0 ? (
             <div style={{ padding: 40, textAlign: "center", color: "#484f58", fontSize: 14 }}>
@@ -218,7 +214,8 @@ export default function EmployeesPage() {
                     <td style={{ padding: "13px 20px" }}>
                       {emp.role !== "ADMIN" && (
                         <button
-                          onClick={() => handleDelete(emp.id)}
+                          onClick={() => handleDeleteRequest(emp)}
+                          aria-label={`Eliminar empleado ${emp.name}`}
                           disabled={deletingId === emp.id}
                           style={{
                             display: "flex", alignItems: "center", gap: 6,
@@ -231,7 +228,7 @@ export default function EmployeesPage() {
                           }}
                         >
                           {deletingId === emp.id
-                            ? <Loader2 size={13} style={{ animation: "spin 1s linear infinite" }} />
+                            ? <Loader2 size={13} className="animate-spin" />
                             : <Trash2 size={13} />
                           }
                           Eliminar
@@ -314,7 +311,7 @@ export default function EmployeesPage() {
                   cursor: formState === "loading" ? "wait" : "pointer",
                   display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
                 }}>
-                  {formState === "loading" && <Loader2 size={15} style={{ animation: "spin 1s linear infinite" }} />}
+                  {formState === "loading" && <Loader2 size={15} className="animate-spin" />}
                   {formState === "loading" ? "Creando..." : "Crear empleado"}
                 </button>
               </div>
@@ -323,7 +320,57 @@ export default function EmployeesPage() {
         </div>
       )}
 
-      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      {/* ── Modal confirmación eliminar empleado ────────────── */}
+      {confirmModal && (
+        <div style={{
+          position: "fixed", inset: 0, zIndex: 100,
+          background: "rgba(0,0,0,0.6)",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          padding: 20,
+        }}>
+          <div style={{
+            background: "#161b22",
+            border: "1px solid rgba(255,255,255,0.08)",
+            borderRadius: 14, width: "100%", maxWidth: 380, padding: 24,
+            textAlign: "center",
+          }}>
+            <div style={{
+              width: 44, height: 44, borderRadius: "50%",
+              background: "rgba(248,113,113,0.13)",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              margin: "0 auto 14px",
+            }}>
+              <Trash2 size={20} color="#f87171" />
+            </div>
+            <div style={{ fontWeight: 700, fontSize: 16, color: "#e6edf3", marginBottom: 8 }}>
+              ¿Eliminar empleado?
+            </div>
+            <p style={{ color: "#8b949e", fontSize: 14, marginBottom: 20 }}>
+              Vas a eliminar a{" "}
+              <span style={{ color: "#e6edf3", fontWeight: 600 }}>"{confirmModal.employeeName}"</span>.
+              Esta acción no se puede deshacer.
+            </p>
+            <div style={{ display: "flex", gap: 10 }}>
+              <button onClick={() => setConfirmModal(null)} style={{
+                flex: 1, padding: "10px", borderRadius: 9,
+                background: "transparent",
+                border: "1px solid rgba(255,255,255,0.08)",
+                color: "#8b949e", fontWeight: 600, fontSize: 14, cursor: "pointer",
+              }}>
+                Cancelar
+              </button>
+              <button onClick={handleDeleteConfirmed} style={{
+                flex: 1, padding: "10px", borderRadius: 9,
+                background: "rgba(248,113,113,0.15)",
+                border: "1px solid rgba(248,113,113,0.25)",
+                color: "#f87171", fontWeight: 700, fontSize: 14, cursor: "pointer",
+              }}>
+                Sí, eliminar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -3,50 +3,16 @@
 import { useEffect, useState } from "react"
 import { ShoppingBag, Users, UtensilsCrossed, TrendingUp, Trash2 } from "lucide-react"
 import api from "@/lib/axios"
+import { useCurrentUser, authHeaders } from "@/lib/auth"
 import TopBar from "@/components/ui/layout/TopBar"
 import StatCard from "@/components/ui/layout/StatCard"
+import type { DashboardStats, Order, SummaryChart, DailySummary } from "@/types/api"
 
-type Stats = {
-  totalIngresos: number
-  totalPropinas: number
-  totalRecibido: number
-  totalPedidos: number
-  totalPlatos: number
-  mesasOcupadas: number
-  totalMesas: number
-}
-
-type Order = {
-  id: string
-  total: number
-  tip: number | null
-  createdAt: string
-  paymentMethod: string | null
-  table: { number: number }
-  items: { id: string; quantity: number; product: { name: string } }[]
-}
-
-type SummaryChart = {
-  date: string
-  day: string
-  pedidos: number
-  ingresos: number
-  platos: number
-  propinas: number
-  efectivo: number
-  datafono: number
-  nequi: number
-}
-
-type SummaryHistory = {
-  id: string
-  date: string
-  totalOrdenes: number
-  totalPlatos: number
-  totalPropinas: number
-  totalGastos: number
-  totalIngresos: number
-}
+type Stats = DashboardStats
+type SummaryHistory = Pick<
+  DailySummary,
+  "id" | "date" | "totalOrdenes" | "totalPlatos" | "totalPropinas" | "totalGastos" | "totalIngresos"
+>
 
 const PAY_COLORS: Record<string, string> = {
   Efectivo: "#22c55e",
@@ -156,31 +122,23 @@ export default function DashboardPage() {
   const [metric, setMetric]               = useState<"ingresos" | "pedidos">("ingresos")
   const [stats, setStats]                 = useState<Stats | null>(null)
   const [history, setHistory]             = useState<Order[]>([])
-  const [restaurantId, setRestaurantId]   = useState("")
-  const [token, setToken]                 = useState("")
   const [summaryHistory, setSummaryHistory] = useState<SummaryHistory[]>([])
   const [baseCaja, setBaseCaja]           = useState(0)
-  const [restaurantName, setRestaurantName] = useState("")
   const [deletingId, setDeletingId]       = useState<string | null>(null)
+
+  const { user, token, restaurantId } = useCurrentUser()
+  const restaurantName = user?.restaurantName ?? ""
 
   const handleDeleteSummary = async (id: string) => {
     if (!confirm("¿Eliminar este cierre del historial?")) return
     setDeletingId(id)
     try {
-      await api.delete(`daily-summary/entry/${id}`, { headers: { Authorization: `Bearer ${token}` } })
+      await api.delete(`daily-summary/entry/${id}`, { headers: authHeaders() })
       setSummaryHistory(prev => prev.filter(s => s.id !== id))
     } finally {
       setDeletingId(null)
     }
   }
-
-  useEffect(() => {
-    const user = JSON.parse(localStorage.getItem("user") || "{}")
-    const t    = localStorage.getItem("token") || ""
-    if (user.restaurantId)   setRestaurantId(user.restaurantId)
-    if (user.restaurantName) setRestaurantName(user.restaurantName)
-    setToken(t)
-  }, [])
 
   useEffect(() => {
     const handleDayClosed = () => {
@@ -193,7 +151,7 @@ export default function DashboardPage() {
 
   useEffect(() => {
     if (!restaurantId || !token) return
-    const headers = { Authorization: `Bearer ${token}` }
+    const headers = authHeaders()
 
     api.get(`orders/stats/${restaurantId}`, { headers })
       .then(r => setStats(r.data))
@@ -226,10 +184,6 @@ export default function DashboardPage() {
         setBaseCaja(base)
       })
   }, [restaurantId, token, period])
-
-  const user = typeof window !== "undefined"
-    ? JSON.parse(localStorage.getItem("user") || "{}")
-    : {}
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100vh", overflow: "hidden" }}>

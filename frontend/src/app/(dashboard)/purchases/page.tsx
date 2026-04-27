@@ -4,34 +4,8 @@ import { useEffect, useState } from "react"
 import { ShoppingCart, TrendingDown, Wallet, Users, Trash2 } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import api from "@/lib/axios"
-
-type MovementType = "COMPRA" | "GASTO" | "BASE_CAJA"
-
-type CashMovement = {
-  id: string
-  type: MovementType
-  concept: string
-  amount: number
-  paymentMethod: string | null
-  notes: string | null
-  createdAt: string
-}
-
-type Employee = {
-  id: string
-  name: string
-  role: string
-}
-
-type EmployeePayment = {
-  id: string
-  userId: string
-  salary: number
-  tip: number
-  notes: string | null
-  createdAt: string
-  user: { name: string; role: string }
-}
+import { useCurrentUser, authHeaders } from "@/lib/auth"
+import type { MovementType, CashMovement, EmployeePayment, Employee } from "@/types/api"
 
 const TYPE_LABELS: Record<MovementType, string> = {
   COMPRA: "Compra",
@@ -49,10 +23,9 @@ export default function ComprasPage() {
   const [movements, setMovements] = useState<CashMovement[]>([])
   const [employees, setEmployees] = useState<Employee[]>([])
   const [payments, setPayments] = useState<EmployeePayment[]>([])
-  const [restaurantId, setRestaurantId] = useState("")
-  const [token, setToken] = useState("")
   const [loading, setLoading] = useState(false)
   const [loadingPago, setLoadingPago] = useState(false)
+  const { token, restaurantId } = useCurrentUser()
 
   const [type, setType] = useState<MovementType>("COMPRA")
   const [concept, setConcept] = useState("")
@@ -67,15 +40,8 @@ export default function ComprasPage() {
   const [notesPago, setNotesPago] = useState("")
 
   useEffect(() => {
-    const user = JSON.parse(localStorage.getItem("user") || "{}")
-    const t = localStorage.getItem("token") || ""
-    if (user.restaurantId) setRestaurantId(user.restaurantId)
-    setToken(t)
-  }, [])
-
-  useEffect(() => {
     if (!restaurantId || !token) return
-    const headers = { Authorization: `Bearer ${token}` }
+    const headers = authHeaders()
     fetchMovements()
     api.get(`/auth/users/${restaurantId}`, { headers })
       .then(res => setEmployees(res.data))
@@ -84,13 +50,13 @@ export default function ComprasPage() {
   }, [restaurantId, token])
 
   const fetchMovements = async () => {
-    const headers = { Authorization: `Bearer ${token}` }
+    const headers = authHeaders()
     const res = await api.get(`/cash-movements/${restaurantId}`, { headers })
     setMovements(res.data)
   }
 
   const fetchPayments = async () => {
-    const headers = { Authorization: `Bearer ${token}` }
+    const headers = authHeaders()
     const res = await api.get(`/employee-payments/${restaurantId}`, { headers })
     setPayments(res.data)
   }
@@ -100,7 +66,7 @@ export default function ComprasPage() {
     if (!concept || !amount) return
     setLoading(true)
     try {
-      const headers = { Authorization: `Bearer ${token}` }
+      const headers = authHeaders()
       await api.post(
         "/cash-movements",
         { type, concept, amount: Number(amount), paymentMethod, notes, restaurantId },
@@ -118,7 +84,7 @@ export default function ComprasPage() {
   }
 
   const handleDelete = async (id: string) => {
-    const headers = { Authorization: `Bearer ${token}` }
+    const headers = authHeaders()
     await api.delete(`/cash-movements/${id}`, { headers })
     setMovements(prev => prev.filter(m => m.id !== id))
   }
@@ -128,7 +94,7 @@ export default function ComprasPage() {
     if (!selectedEmployee || !salary) return
     setLoadingPago(true)
     try {
-      const headers = { Authorization: `Bearer ${token}` }
+      const headers = authHeaders()
       await api.post(
         "/employee-payments",
         {
@@ -153,7 +119,7 @@ export default function ComprasPage() {
   }
 
   const handleDeletePago = async (id: string) => {
-    const headers = { Authorization: `Bearer ${token}` }
+    const headers = authHeaders()
     await api.delete(`/employee-payments/${id}`, { headers })
     setPayments(prev => prev.filter(p => p.id !== id))
   }
@@ -201,7 +167,7 @@ export default function ComprasPage() {
   ]
 
   return (
-    <div className="p-8 space-y-8">
+    <div className="p-8 space-y-8 h-full overflow-y-auto">
 
       <div>
         <h1 className="text-3xl font-bold text-white">Compras y Gastos</h1>
@@ -242,7 +208,7 @@ export default function ComprasPage() {
                 if (!baseCajaAmount) return
                 setLoading(true)
                 try {
-                  const headers = { Authorization: `Bearer ${token}` }
+                  const headers = authHeaders()
                   await api.post("/cash-movements", {
                     type: "BASE_CAJA",
                     concept: "Base de caja",
