@@ -64,11 +64,14 @@ export default function TablesPage() {
     setSelectedTable(table)
     setLoading(true)
 
-    if (table.status === "DISPONIBLE") {
+    const existingRes = await api.get(`/orders/table/${table.id}`, { headers: authHeaders() })
+    const existingOrder = existingRes.data
+
+    if (existingOrder) {
+      setActiveOrder(existingOrder)
+    } else {
       const res = await api.post("/orders", { tableId: table.id, restaurantId }, { headers: authHeaders() })
       setActiveOrder(res.data)
-    } else {
-      await fetchActiveOrder(table.id)
     }
 
     setLoading(false)
@@ -79,16 +82,11 @@ export default function TablesPage() {
     if (!activeOrder) return
     try {
       await api.post(`/orders/${activeOrder.id}/items`, { productId, quantity }, { headers: authHeaders() })
-
-      if (selectedTable?.status === "DISPONIBLE") {
-        await api.patch(`/tables/${selectedTable.id}/status`, { status: "OCUPADA" }, { headers: authHeaders() })
-        setSelectedTable(prev => prev ? { ...prev, status: "OCUPADA" } : prev)
-        setTables(prev => prev.map(t => t.id === selectedTable.id ? { ...t, status: "OCUPADA" } : t))
-      }
-
       const res = await api.get(`/orders/${activeOrder.id}`, { headers: authHeaders() })
       setActiveOrder(res.data)
       setQuantities(q => ({ ...q, [productId]: 1 }))
+      setTables(prev => prev.map(t => t.id === selectedTable?.id ? { ...t, status: "OCUPADA" } : t))
+      setSelectedTable(prev => prev ? { ...prev, status: "OCUPADA" } : prev)
     } catch (error: any) {
       alert(error?.response?.data?.message || "Error al agregar producto")
     }

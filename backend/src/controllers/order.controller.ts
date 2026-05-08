@@ -3,6 +3,7 @@ import { prisma } from "../lib/prisma"
 import { CreateOrderSchema, AddItemSchema, CloseOrderSchema } from "../lib/validators"
 import { asyncHandler } from "../lib/asyncHandler"
 import { BusinessError } from "../lib/errors"
+import { getColombiaDayRange } from "../lib/date"
 
 export const createOrder = asyncHandler(async (req: Request, res: Response) => {
   const data = CreateOrderSchema.parse(req.body)
@@ -162,8 +163,9 @@ export const removeItemFromOrder = asyncHandler(async (req: Request, res: Respon
 
 export const getOrderHistory = asyncHandler(async (req: Request, res: Response) => {
   const restaurantId = req.params.restaurantId as string
+  const { today, tomorrow } = getColombiaDayRange()
   const orders = await prisma.order.findMany({
-    where: { restaurantId, status: "CERRADA" },
+    where: { restaurantId, status: "CERRADA", createdAt: { gte: today, lt: tomorrow } },
     orderBy: { createdAt: "desc" },
     take: 20,
     include: { table: true, items: { include: { product: true } } },
@@ -174,11 +176,10 @@ export const getOrderHistory = asyncHandler(async (req: Request, res: Response) 
 export const getDashboardStats = asyncHandler(async (req: Request, res: Response) => {
   const restaurantId = req.params.restaurantId as string
 
-  const startOfDay = new Date()
-  startOfDay.setHours(0, 0, 0, 0)
+  const { today, tomorrow } = getColombiaDayRange()
 
   const ordersToday = await prisma.order.findMany({
-    where: { restaurantId, status: "CERRADA", createdAt: { gte: startOfDay } },
+    where: { restaurantId, status: "CERRADA", createdAt: { gte: today, lt: tomorrow } },
     include: { items: { select: { quantity: true } } },
   })
   const tables = await prisma.table.findMany({ where: { restaurantId } })
