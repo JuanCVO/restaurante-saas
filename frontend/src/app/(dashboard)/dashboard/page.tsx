@@ -32,24 +32,20 @@ function BarChart({ data, metric }: { data: SummaryChart[]; metric: "ingresos" |
       : `${v}`
 
   return (
-    <div style={{ width: "100%", paddingBottom: 4 }}>
+    <div className="w-full pb-1">
       {/* Bars area */}
-      <div style={{ position: "relative", height: 180 }}>
+      <div className="relative h-[180px]">
         {/* Gridlines */}
         {[0.25, 0.5, 0.75, 1].map(t => (
-          <div key={t} style={{
-            position: "absolute", left: 0, right: 0,
-            bottom: `${t * 100}%`, height: 1,
-            background: "rgba(255,255,255,0.05)",
-            pointerEvents: "none",
-          }} />
+          <div
+            key={t}
+            className="absolute left-0 right-0 h-px pointer-events-none"
+            style={{ bottom: `${t * 100}%`, background: "rgba(255,255,255,0.05)" }}
+          />
         ))}
 
         {/* Bars */}
-        <div style={{
-          position: "absolute", inset: 0,
-          display: "flex", alignItems: "flex-end", gap: 6, padding: "0 4px",
-        }}>
+        <div className="absolute inset-0 flex items-end gap-1.5 px-1">
           {data.map((_d, i) => {
             const val    = vals[i]
             const pct    = (val / max) * 100
@@ -60,35 +56,32 @@ function BarChart({ data, metric }: { data: SummaryChart[]; metric: "ingresos" |
             return (
               <div
                 key={i}
-                style={{ flex: 1, height: "100%", display: "flex", flexDirection: "column", justifyContent: "flex-end", alignItems: "center", position: "relative", cursor: "default" }}
+                className="flex-1 h-full flex flex-col justify-end items-center relative cursor-default"
                 onMouseEnter={() => setHov(i)}
                 onMouseLeave={() => setHov(null)}
               >
                 {/* Value label */}
                 {val > 0 && (isHov || isLast) && (
-                  <div style={{
-                    position: "absolute",
-                    bottom: `calc(${pct}% + 8px)`,
-                    fontSize: 11, fontWeight: 700,
-                    color: isLast ? "#f97316" : "#60a5fa",
-                    whiteSpace: "nowrap",
-                    background: "#161b22",
-                    padding: "2px 7px", borderRadius: 5,
-                    border: "1px solid rgba(255,255,255,0.08)",
-                    zIndex: 10,
-                  }}>
+                  <div
+                    className="absolute text-[11px] font-bold whitespace-nowrap px-1.5 py-0.5 rounded-[5px] border border-white/8 z-10"
+                    style={{
+                      bottom: `calc(${pct}% + 8px)`,
+                      color: isLast ? "#f97316" : "#60a5fa",
+                      background: "#161b22",
+                    }}
+                  >
                     {fmt(val)}
                   </div>
                 )}
 
                 {/* Bar */}
-                <div style={{
-                  width: "62%",
-                  height: `${Math.max(pct, val > 0 ? 1.5 : 0)}%`,
-                  background: fill,
-                  borderRadius: "5px 5px 2px 2px",
-                  transition: "background 0.15s",
-                }} />
+                <div
+                  className="w-[62%] rounded-t-[5px] rounded-b-[2px] transition-[background] duration-150"
+                  style={{
+                    height: `${Math.max(pct, val > 0 ? 1.5 : 0)}%`,
+                    background: fill,
+                  }}
+                />
               </div>
             )
           })}
@@ -96,17 +89,18 @@ function BarChart({ data, metric }: { data: SummaryChart[]; metric: "ingresos" |
       </div>
 
       {/* Day labels row */}
-      <div style={{ display: "flex", gap: 6, padding: "10px 4px 0" }}>
+      <div className="flex gap-1.5 px-1 pt-2.5">
         {data.map((d, i) => {
           const isLast = i === data.length - 1
           return (
-            <div key={i} style={{
-              flex: 1, textAlign: "center",
-              fontSize: 12,
-              color: isLast ? "#f97316" : "#8b949e",
-              fontWeight: isLast ? 700 : 400,
-              userSelect: "none",
-            }}>
+            <div
+              key={i}
+              className="flex-1 text-center text-xs select-none"
+              style={{
+                color: isLast ? "#f97316" : "#8b949e",
+                fontWeight: isLast ? 700 : 400,
+              }}
+            >
               {d.day}
             </div>
           )
@@ -117,14 +111,14 @@ function BarChart({ data, metric }: { data: SummaryChart[]; metric: "ingresos" |
 }
 
 export default function DashboardPage() {
-  const [chartData, setChartData]         = useState<SummaryChart[]>([])
-  const [period, setPeriod]               = useState<"week" | "month">("week")
-  const [metric, setMetric]               = useState<"ingresos" | "pedidos">("ingresos")
-  const [stats, setStats]                 = useState<Stats | null>(null)
-  const [history, setHistory]             = useState<Order[]>([])
+  const [chartData, setChartData]           = useState<SummaryChart[]>([])
+  const [period, setPeriod]                 = useState<"week" | "month">("week")
+  const [metric, setMetric]                 = useState<"ingresos" | "pedidos">("ingresos")
+  const [stats, setStats]                   = useState<Stats | null>(null)
+  const [history, setHistory]               = useState<Order[]>([])
   const [summaryHistory, setSummaryHistory] = useState<SummaryHistory[]>([])
-  const [baseCaja, setBaseCaja]           = useState(0)
-  const [deletingId, setDeletingId]       = useState<string | null>(null)
+  const [baseCaja, setBaseCaja]             = useState(0)
+  const [deletingId, setDeletingId]         = useState<string | null>(null)
 
   const { user, token, restaurantId } = useCurrentUser()
   const restaurantName = user?.restaurantName ?? ""
@@ -186,37 +180,24 @@ export default function DashboardPage() {
   }, [restaurantId, token, period])
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100vh", overflow: "hidden" }}>
+    <div className="flex flex-col h-screen overflow-hidden">
       <TopBar title="Dashboard" />
 
-      <div style={{
-        flex: 1, overflowY: "auto",
-        padding: "24px 28px",
-        display: "flex", flexDirection: "column", gap: 22,
-      }}>
+      <div className="flex-1 overflow-y-auto px-7 py-6 flex flex-col gap-6">
 
         {/* Header */}
         <div>
-          <h2 style={{ fontSize: 21, fontWeight: 800, color: "#e6edf3" }}>
-            Bienvenidos
-          </h2>
-          <p style={{ fontSize: 14, color: "#8b949e", marginTop: 4 }}>
+          <h2 className="text-[21px] font-extrabold text-[#e6edf3]">Bienvenidos</h2>
+          <p className="text-sm text-[#8b949e] mt-1">
             Resumen de hoy en{" "}
-            <span
-              suppressHydrationWarning
-              style={{ color: "#f97316", fontWeight: 600 }}
-            >
+            <span suppressHydrationWarning className="text-orange-500 font-semibold">
               {restaurantName}
             </span>
           </p>
         </div>
 
         {/* Stat Cards */}
-        <div style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-          gap: 14,
-        }}>
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-3.5">
           <StatCard
             label="Pedidos hoy"
             value={stats?.totalPedidos ?? 0}
@@ -269,58 +250,47 @@ export default function DashboardPage() {
         </div>
 
         {/* Gráfica */}
-        <div style={{
-          background: "#1c2128",
-          border: "1px solid rgba(255,255,255,0.08)",
-          borderRadius: 12, overflow: "hidden",
-        }}>
-          <div style={{
-            padding: "16px 20px",
-            borderBottom: "1px solid rgba(255,255,255,0.08)",
-            display: "flex", alignItems: "center", justifyContent: "space-between",
-            gap: 12, flexWrap: "wrap",
-          }}>
+        <div className="bg-[#1c2128] border border-white/8 rounded-xl overflow-hidden">
+          <div className="px-5 py-4 border-b border-white/8 flex items-center justify-between gap-3 flex-wrap">
             <div>
-              <div style={{ fontWeight: 700, fontSize: 15, color: "#e6edf3" }}>
-                Ventas archivadas
-              </div>
-              <div style={{ fontSize: 12, color: "#8b949e", marginTop: 2 }}>
-                Último día resaltado en naranja
-              </div>
+              <p className="font-bold text-[15px] text-[#e6edf3]">Ventas archivadas</p>
+              <p className="text-xs text-[#8b949e] mt-0.5">Último día resaltado en naranja</p>
             </div>
-            <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+            <div className="flex gap-1.5 items-center flex-wrap">
               {(["ingresos", "pedidos"] as const).map(m => (
-                <button key={m} onClick={() => setMetric(m)} style={{
-                  padding: "6px 14px", borderRadius: 8,
-                  fontSize: 13, fontWeight: 600, cursor: "pointer",
-                  background: metric === m ? "#f97316" : "#161b22",
-                  color:      metric === m ? "#fff"    : "#8b949e",
-                  border: `1px solid ${metric === m ? "#f97316" : "rgba(255,255,255,0.08)"}`,
-                  transition: "all 0.15s",
-                }}>
+                <button
+                  key={m}
+                  onClick={() => setMetric(m)}
+                  className={`px-3.5 py-1.5 rounded-lg text-[13px] font-semibold cursor-pointer transition-all border ${
+                    metric === m
+                      ? "bg-orange-500 text-white border-orange-500"
+                      : "bg-[#161b22] text-[#8b949e] border-white/8"
+                  }`}
+                >
                   {m === "ingresos" ? "Ingresos" : "Pedidos"}
                 </button>
               ))}
-              <div style={{ width: 1, height: 20, background: "rgba(255,255,255,0.08)" }} />
+              <div className="w-px h-5 bg-white/8" />
               {(["week", "month"] as const).map(p => (
-                <button key={p} onClick={() => setPeriod(p)} style={{
-                  padding: "6px 12px", borderRadius: 8,
-                  fontSize: 13, fontWeight: 600, cursor: "pointer",
-                  background: period === p ? "rgba(255,255,255,0.08)" : "transparent",
-                  color:      period === p ? "#e6edf3" : "#8b949e",
-                  border: `1px solid ${period === p ? "rgba(255,255,255,0.14)" : "transparent"}`,
-                  transition: "all 0.15s",
-                }}>
+                <button
+                  key={p}
+                  onClick={() => setPeriod(p)}
+                  className={`px-3 py-1.5 rounded-lg text-[13px] font-semibold cursor-pointer transition-all border ${
+                    period === p
+                      ? "bg-white/8 text-[#e6edf3] border-white/[0.14]"
+                      : "bg-transparent text-[#8b949e] border-transparent"
+                  }`}
+                >
                   {p === "week" ? "7d" : "30d"}
                 </button>
               ))}
             </div>
           </div>
-          <div style={{ padding: "16px 20px 0" }}>
+          <div className="px-5 pt-4">
             {chartData.length > 0 ? (
               <BarChart data={chartData} metric={metric} />
             ) : (
-              <div style={{ height: 180, display: "flex", alignItems: "center", justifyContent: "center", color: "#484f58", fontSize: 14 }}>
+              <div className="h-[180px] flex items-center justify-center text-[#484f58] text-sm">
                 Sin datos archivados aún
               </div>
             )}
@@ -329,74 +299,64 @@ export default function DashboardPage() {
 
         {/* Historial de ventas */}
         <div>
-          <h2 style={{ color: "#e6edf3", fontWeight: 700, fontSize: 17, marginBottom: 14 }}>
-            Historial de ventas
-          </h2>
-          <div style={{
-            background: "#1c2128",
-            border: "1px solid rgba(255,255,255,0.08)",
-            borderRadius: 12, overflow: "hidden",
-          }}>
-            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <h2 className="text-[#e6edf3] font-bold text-[17px] mb-3.5">Historial de ventas</h2>
+          <div className="bg-[#1c2128] border border-white/8 rounded-xl overflow-hidden">
+            <table className="w-full border-collapse">
               <thead>
-                <tr style={{ borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
+                <tr className="border-b border-white/8">
                   {["Orden","Mesa","Productos","Hora","Pago","Propina","Total"].map(h => (
-                    <th key={h} style={{
-                      textAlign: "left", padding: "10px 16px",
-                      fontSize: 11, fontWeight: 700,
-                      color: "#484f58", textTransform: "uppercase", letterSpacing: 0.6,
-                    }}>{h}</th>
+                    <th key={h} className="text-left px-4 py-2.5 text-[11px] font-bold text-[#484f58] uppercase tracking-[0.6px]">
+                      {h}
+                    </th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {history.map((order, i) => (
-                  <tr key={order.id} style={{
-                    borderBottom: i < history.length - 1
-                      ? "1px solid rgba(255,255,255,0.05)" : "none",
-                    transition: "background 0.1s",
-                  }}
-                    onMouseEnter={e => (e.currentTarget.style.background = "rgba(255,255,255,0.03)")}
-                    onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
+                  <tr
+                    key={order.id}
+                    className="transition-colors duration-100 hover:bg-white/[0.03]"
+                    style={{ borderBottom: i < history.length - 1 ? "1px solid rgba(255,255,255,0.05)" : "none" }}
                   >
-                    <td style={{ padding: "11px 16px", fontFamily: "monospace", fontSize: 12, color: "#8b949e" }}>
+                    <td className="px-4 py-[11px] font-mono text-xs text-[#8b949e]">
                       #{order.id.slice(0, 8)}
                     </td>
-                    <td style={{ padding: "11px 16px", fontWeight: 700, color: "#e6edf3", fontSize: 14 }}>
+                    <td className="px-4 py-[11px] font-bold text-[#e6edf3] text-sm">
                       Mesa {order.table?.number ?? "–"}
                     </td>
-                    <td style={{ padding: "11px 16px", color: "#8b949e", fontSize: 13, maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    <td className="px-4 py-[11px] text-[#8b949e] text-[13px] max-w-[200px] overflow-hidden text-ellipsis whitespace-nowrap">
                       {order.items.map(i => `${i.product.name} x${i.quantity}`).join(", ")}
                     </td>
-                    <td style={{ padding: "11px 16px", color: "#8b949e", fontSize: 13 }}>
+                    <td className="px-4 py-[11px] text-[#8b949e] text-[13px]">
                       {new Date(order.createdAt).toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit" })}
                     </td>
-                    <td style={{ padding: "11px 16px" }}>
+                    <td className="px-4 py-[11px]">
                       {order.paymentMethod ? (
-                        <span style={{
-                          background: `${PAY_COLORS[order.paymentMethod] ?? "#8b949e"}20`,
-                          color: PAY_COLORS[order.paymentMethod] ?? "#8b949e",
-                          padding: "2px 10px", borderRadius: 99,
-                          fontSize: 12, fontWeight: 600,
-                        }}>
+                        <span
+                          className="px-2.5 py-0.5 rounded-full text-xs font-semibold"
+                          style={{
+                            background: `${PAY_COLORS[order.paymentMethod] ?? "#8b949e"}20`,
+                            color: PAY_COLORS[order.paymentMethod] ?? "#8b949e",
+                          }}
+                        >
                           {order.paymentMethod}
                         </span>
                       ) : "–"}
                     </td>
-                    <td style={{ padding: "11px 16px", fontSize: 13, fontWeight: 600 }}>
+                    <td className="px-4 py-[11px] text-[13px] font-semibold">
                       {order.tip && order.tip > 0
-                        ? <span style={{ color: "#fbbf24" }}>${order.tip.toLocaleString()}</span>
-                        : <span style={{ color: "#484f58" }}>–</span>
+                        ? <span className="text-amber-400">${order.tip.toLocaleString()}</span>
+                        : <span className="text-[#484f58]">–</span>
                       }
                     </td>
-                    <td style={{ padding: "11px 16px", fontWeight: 700, color: "#f97316", fontSize: 14 }}>
+                    <td className="px-4 py-[11px] font-bold text-orange-500 text-sm">
                       ${order.total.toLocaleString()}
                     </td>
                   </tr>
                 ))}
                 {history.length === 0 && (
                   <tr>
-                    <td colSpan={7} style={{ padding: 32, textAlign: "center", color: "#484f58", fontSize: 14 }}>
+                    <td colSpan={7} className="py-8 text-center text-[#484f58] text-sm">
                       No hay ventas cerradas hoy todavía
                     </td>
                   </tr>
@@ -408,66 +368,49 @@ export default function DashboardPage() {
 
         {/* Historial de cierres */}
         <div>
-          <h2 style={{ color: "#e6edf3", fontWeight: 700, fontSize: 17, marginBottom: 14 }}>
-            Historial de cierres
-          </h2>
-          <div style={{
-            background: "#1c2128",
-            border: "1px solid rgba(255,255,255,0.08)",
-            borderRadius: 12, overflow: "hidden",
-          }}>
-            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <h2 className="text-[#e6edf3] font-bold text-[17px] mb-3.5">Historial de cierres</h2>
+          <div className="bg-[#1c2128] border border-white/8 rounded-xl overflow-hidden">
+            <table className="w-full border-collapse">
               <thead>
-                <tr style={{ borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
+                <tr className="border-b border-white/8">
                   {["Fecha","Órdenes","Platos","Propinas","Gastos","Ingresos netos",""].map(h => (
-                    <th key={h} style={{
-                      textAlign: "left", padding: "10px 16px",
-                      fontSize: 11, fontWeight: 700,
-                      color: "#484f58", textTransform: "uppercase", letterSpacing: 0.6,
-                    }}>{h}</th>
+                    <th key={h} className="text-left px-4 py-2.5 text-[11px] font-bold text-[#484f58] uppercase tracking-[0.6px]">
+                      {h}
+                    </th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {summaryHistory.map((s, i) => (
-                  <tr key={s.id} style={{
-                    borderBottom: i < summaryHistory.length - 1
-                      ? "1px solid rgba(255,255,255,0.05)" : "none",
-                    transition: "background 0.1s",
-                  }}
-                    onMouseEnter={e => (e.currentTarget.style.background = "rgba(255,255,255,0.03)")}
-                    onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
+                  <tr
+                    key={s.id}
+                    className="transition-colors duration-100 hover:bg-white/[0.03]"
+                    style={{ borderBottom: i < summaryHistory.length - 1 ? "1px solid rgba(255,255,255,0.05)" : "none" }}
                   >
-                    <td style={{ padding: "11px 16px", color: "#8b949e", fontSize: 13 }}>
+                    <td className="px-4 py-[11px] text-[#8b949e] text-[13px]">
                       {new Date(s.date).toLocaleDateString("es-CO", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: "America/Bogota" })}
                     </td>
-                    <td style={{ padding: "11px 16px", fontWeight: 700, color: "#e6edf3" }}>
-                      {s.totalOrdenes}
-                    </td>
-                    <td style={{ padding: "11px 16px", color: "#8b949e", fontSize: 13 }}>
-                      {s.totalPlatos}
-                    </td>
-                    <td style={{ padding: "11px 16px", fontWeight: 600, color: "#fbbf24", fontSize: 13 }}>
+                    <td className="px-4 py-[11px] font-bold text-[#e6edf3]">{s.totalOrdenes}</td>
+                    <td className="px-4 py-[11px] text-[#8b949e] text-[13px]">{s.totalPlatos}</td>
+                    <td className="px-4 py-[11px] font-semibold text-amber-400 text-[13px]">
                       ${s.totalPropinas.toLocaleString()}
                     </td>
-                    <td style={{ padding: "11px 16px", fontWeight: 600, color: "#f87171", fontSize: 13 }}>
+                    <td className="px-4 py-[11px] font-semibold text-[#f87171] text-[13px]">
                       {(s.totalGastos ?? 0) > 0
                         ? `- $${(s.totalGastos ?? 0).toLocaleString()}`
-                        : <span style={{ color: "#484f58" }}>–</span>}
+                        : <span className="text-[#484f58]">–</span>}
                     </td>
-                    <td style={{ padding: "11px 16px", fontWeight: 700, color: "#f97316", fontSize: 14 }}>
+                    <td className="px-4 py-[11px] font-bold text-orange-500 text-sm">
                       ${s.totalIngresos.toLocaleString()}
                     </td>
-                    <td style={{ padding: "11px 16px" }}>
+                    <td className="px-4 py-[11px]">
                       <button
                         onClick={() => handleDeleteSummary(s.id)}
                         disabled={deletingId === s.id}
                         title="Eliminar cierre"
-                        style={{
-                          background: "none", border: "none", cursor: "pointer",
-                          color: deletingId === s.id ? "#484f58" : "#f87171",
-                          padding: 4, display: "flex", alignItems: "center",
-                        }}
+                        className={`flex items-center p-1 border-none bg-transparent cursor-pointer transition-colors ${
+                          deletingId === s.id ? "text-[#484f58]" : "text-[#f87171] hover:text-red-400"
+                        }`}
                       >
                         <Trash2 size={15} />
                       </button>
@@ -476,7 +419,7 @@ export default function DashboardPage() {
                 ))}
                 {summaryHistory.length === 0 && (
                   <tr>
-                    <td colSpan={7} style={{ padding: 32, textAlign: "center", color: "#484f58", fontSize: 14 }}>
+                    <td colSpan={7} className="py-8 text-center text-[#484f58] text-sm">
                       No hay cierres registrados aún
                     </td>
                   </tr>
@@ -487,14 +430,10 @@ export default function DashboardPage() {
         </div>
 
         {/* Footer */}
-        <div style={{
-          marginTop: 12, paddingTop: 20,
-          borderTop: "1px solid rgba(255,255,255,0.05)",
-          textAlign: "center",
-        }}>
-          <p style={{ color: "#484f58", fontSize: 12 }}>
+        <div className="mt-3 pt-5 border-t border-white/5 text-center">
+          <p className="text-[#484f58] text-xs">
             Sistema desarrollado por{" "}
-            <span style={{ color: "rgba(249,115,22,0.7)", fontWeight: 600 }}>@JuanCVO</span>
+            <span className="text-orange-500/70 font-semibold">@JuanCVO</span>
           </p>
         </div>
 

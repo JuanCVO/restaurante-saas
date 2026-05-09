@@ -1,16 +1,12 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { Package, Plus, Search, AlertTriangle, Pencil, Trash2, X } from "lucide-react"
+import { Package, Plus, Search, AlertTriangle, Pencil, Trash2, X, Tag } from "lucide-react"
 import api from "@/lib/axios"
 import { useCurrentUser, authHeaders } from "@/lib/auth"
 import TopBar from "@/components/ui/layout/TopBar"
 
-// ── Tipos ────────────────────────────────────────────────────
-type Category = {
-  id: string
-  name: string
-}
+type Category = { id: string; name: string }
 
 type Product = {
   id: string
@@ -34,66 +30,53 @@ type ProductForm = {
 
 const UNITS = ["porciones", "unidades", "kg", "litros", "gramos", "ml"]
 
-const BADGE: Record<string, { bg: string; color: string; label: string }> = {
-  ok:    { bg: "rgba(34,197,94,0.13)",   color: "#22c55e", label: "OK" },
-  low:   { bg: "rgba(251,191,36,0.13)",  color: "#fbbf24", label: "Stock bajo" },
-  empty: { bg: "rgba(248,113,113,0.13)", color: "#f87171", label: "Sin stock" },
+const BADGE = {
+  ok:    { className: "bg-green-500/[0.13] text-green-400",  label: "OK" },
+  low:   { className: "bg-amber-400/[0.13] text-amber-400",  label: "Stock bajo" },
+  empty: { className: "bg-red-400/[0.13] text-[#f87171]",    label: "Sin stock" },
 }
 
 function Badge({ type }: { type: "ok" | "low" | "empty" }) {
   const b = BADGE[type]
   return (
-    <span style={{
-      background: b.bg, color: b.color,
-      padding: "2px 10px", borderRadius: 99,
-      fontSize: 12, fontWeight: 600,
-    }}>{b.label}</span>
+    <span className={`${b.className} px-2.5 py-0.5 rounded-full text-xs font-semibold`}>
+      {b.label}
+    </span>
   )
 }
 
-const iSt: React.CSSProperties = {
-  background: "#0d1117",
-  border: "1px solid rgba(255,255,255,0.08)",
-  borderRadius: 8, padding: "9px 12px",
-  color: "#e6edf3", fontSize: 14, width: "100%",
-  fontFamily: "inherit", outline: "none",
-}
+const inputCls = "w-full bg-[#0d1117] border border-white/8 rounded-lg px-3 py-[9px] text-[#e6edf3] text-sm font-[inherit] outline-none"
 
-// ── Página ───────────────────────────────────────────────────
 export default function InventoryPage() {
-  const [products,    setProducts]    = useState<Product[]>([])
-  const [categories,  setCategories]  = useState<Category[]>([])
-  const [search,      setSearch]      = useState("")
-  const [catFilter,   setCatFilter]   = useState("Todas")
-  const [modal,       setModal]       = useState(false)
-  const [delModal,    setDelModal]    = useState(false)
-  const [editing,     setEditing]     = useState<Product | null>(null)
-  const [delTarget,   setDelTarget]   = useState<Product | null>(null)
-  const [saving,      setSaving]      = useState(false)
+  const [products,   setProducts]   = useState<Product[]>([])
+  const [categories, setCategories] = useState<Category[]>([])
+  const [search,     setSearch]     = useState("")
+  const [catFilter,  setCatFilter]  = useState("Todas")
+  const [modal,      setModal]      = useState(false)
+  const [delModal,   setDelModal]   = useState(false)
+  const [editing,    setEditing]    = useState<Product | null>(null)
+  const [delTarget,  setDelTarget]  = useState<Product | null>(null)
+  const [saving,     setSaving]     = useState(false)
+  const [catModal,   setCatModal]   = useState(false)
+  const [newCatName, setNewCatName] = useState("")
+  const [savingCat,  setSavingCat]  = useState(false)
   const { token, restaurantId } = useCurrentUser()
 
   const FORM_INIT: ProductForm = {
-    name: "", price: "", unit: "unidades",
-    stock: "", minStock: "5", categoryId: "",
+    name: "", price: "", unit: "unidades", stock: "", minStock: "5", categoryId: "",
   }
   const [form, setForm] = useState<ProductForm>(FORM_INIT)
 
-  // Fetch datos
   useEffect(() => {
     if (!restaurantId || !token) return
     const headers = authHeaders()
-
-    api.get(`/products/${restaurantId}`, { headers })
-      .then(r => setProducts(r.data))
-
-    api.get(`/categories/${restaurantId}`, { headers })
-      .then(r => setCategories(r.data))
+    api.get(`/products/${restaurantId}`, { headers }).then(r => setProducts(r.data))
+    api.get(`/categories/${restaurantId}`, { headers }).then(r => setCategories(r.data))
   }, [restaurantId, token])
 
-  // ── Helpers ─────────────────────────────────────────────
   const headers = authHeaders()
 
-  const lowStock  = products.filter(p => p.stock <= p.minStock && p.stock > 0)
+  const lowStock   = products.filter(p => p.stock <= p.minStock && p.stock > 0)
   const emptyStock = products.filter(p => p.stock === 0)
   const alertCount = lowStock.length + emptyStock.length
 
@@ -104,12 +87,11 @@ export default function InventoryPage() {
   })
 
   const getStatus = (p: Product): "ok" | "low" | "empty" => {
-    if (p.stock === 0)            return "empty"
-    if (p.stock <= p.minStock)    return "low"
+    if (p.stock === 0)         return "empty"
+    if (p.stock <= p.minStock) return "low"
     return "ok"
   }
 
-  // ── Modal handlers ───────────────────────────────────────
   const openNew = () => {
     setEditing(null)
     setForm({ ...FORM_INIT, categoryId: categories[0]?.id ?? "" })
@@ -119,12 +101,8 @@ export default function InventoryPage() {
   const openEdit = (p: Product) => {
     setEditing(p)
     setForm({
-      name:       p.name,
-      price:      String(p.price),
-      unit:       p.unit,
-      stock:      String(p.stock),
-      minStock:   String(p.minStock),
-      categoryId: p.categoryId,
+      name: p.name, price: String(p.price), unit: p.unit,
+      stock: String(p.stock), minStock: String(p.minStock), categoryId: p.categoryId,
     })
     setModal(true)
   }
@@ -133,13 +111,9 @@ export default function InventoryPage() {
     e.preventDefault()
     setSaving(true)
     const body = {
-      name:        form.name,
-      price:       Number(form.price),
-      unit:        form.unit,
-      stock:       Number(form.stock),
-      minStock:    Number(form.minStock),
-      categoryId:  form.categoryId,
-      restaurantId,
+      name: form.name, price: Number(form.price), unit: form.unit,
+      stock: Number(form.stock), minStock: Number(form.minStock),
+      categoryId: form.categoryId, restaurantId,
     }
     try {
       if (editing) {
@@ -157,10 +131,7 @@ export default function InventoryPage() {
     }
   }
 
-  const confirmDelete = (p: Product) => {
-    setDelTarget(p)
-    setDelModal(true)
-  }
+  const confirmDelete = (p: Product) => { setDelTarget(p); setDelModal(true) }
 
   const handleDelete = async () => {
     if (!delTarget) return
@@ -174,165 +145,158 @@ export default function InventoryPage() {
     }
   }
 
-  // ── Render ───────────────────────────────────────────────
+  const handleCreateCategory = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!newCatName.trim()) return
+    setSavingCat(true)
+    try {
+      const res = await api.post("/categories", { name: newCatName.trim(), restaurantId }, { headers })
+      setCategories(prev => [...prev, res.data].sort((a, b) => a.name.localeCompare(b.name)))
+      setNewCatName("")
+      setCatModal(false)
+    } catch {
+      alert("Error al crear la categoría")
+    } finally {
+      setSavingCat(false)
+    }
+  }
+
+  const handleDeleteCategory = async (id: string, name: string) => {
+    if (products.some(p => p.categoryId === id)) {
+      alert(`No puedes eliminar "${name}" porque tiene productos asignados.`)
+      return
+    }
+    if (!confirm(`¿Eliminar la categoría "${name}"?`)) return
+    try {
+      await api.delete(`/categories/${id}`, { headers })
+      setCategories(prev => prev.filter(c => c.id !== id))
+      if (catFilter === name) setCatFilter("Todas")
+    } catch {
+      alert("Error al eliminar la categoría")
+    }
+  }
+
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100vh", overflow: "hidden" }}>
+    <div className="flex flex-col h-screen overflow-hidden">
       <TopBar title="Inventario" />
 
-      <div style={{
-        flex: 1, overflowY: "auto", padding: "24px 28px",
-        display: "flex", flexDirection: "column", gap: 18,
-      }}>
+      <div className="flex-1 overflow-y-auto px-7 py-6 flex flex-col gap-[18px]">
 
         {/* Header */}
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between"}}>
+        <div className="flex items-center justify-between">
           <div>
-            <h2 style={{ fontSize: 21, fontWeight: 800, color: "#e6edf3" }}>Inventario</h2>
-            <p style={{ fontSize: 14, color: "#8b949e", marginTop: 4 }}>
-              {products.length} productos registrados
-            </p>
+            <h2 className="text-[21px] font-extrabold text-[#e6edf3]">Inventario</h2>
+            <p className="text-sm text-[#8b949e] mt-1">{products.length} productos registrados</p>
           </div>
-          <button onClick={openNew} style={{
-            display: "flex", alignItems: "center", gap: 8,
-            padding: "9px 16px", borderRadius: 9,
-            background: "#f97316", color: "#fff",
-            fontWeight: 700, fontSize: 14,
-            border: "none", cursor: "pointer",
-            boxShadow: "0 0 12px #f9731640",
-            transition: "background 0.15s",
-          }}
-            onMouseEnter={e => (e.currentTarget.style.background = "#ea6c0a")}
-            onMouseLeave={e => (e.currentTarget.style.background = "#f97316")}
-          >
-            <Plus size={15} /> Nuevo producto
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setCatModal(true)}
+              className="flex items-center gap-2 px-4 py-[9px] rounded-[9px] bg-[#1c2128] text-[#e6edf3] font-bold text-sm border border-white/8 cursor-pointer hover:bg-[#21262d] transition-colors"
+            >
+              <Tag size={15} /> Categorías
+            </button>
+            <button
+              onClick={openNew}
+              className="flex items-center gap-2 px-4 py-[9px] rounded-[9px] bg-orange-500 text-white font-bold text-sm border-none cursor-pointer shadow-[0_0_12px_#f9731640] hover:bg-orange-600 transition-colors"
+            >
+              <Plus size={15} /> Nuevo producto
+            </button>
+          </div>
         </div>
 
         {/* Alerta stock bajo */}
         {alertCount > 0 && (
-          <div style={{
-            background: "rgba(248,113,113,0.08)",
-            border: "1px solid rgba(248,113,113,0.22)",
-            borderRadius: 10, padding: "13px 18px",
-            display: "flex", alignItems: "flex-start", gap: 12,
-          }}>
-            <AlertTriangle size={17} color="#f87171" style={{ marginTop: 1, flexShrink: 0 }} />
+          <div className="bg-red-400/[0.08] border border-red-400/[0.22] rounded-[10px] px-[18px] py-[13px] flex items-start gap-3">
+            <AlertTriangle size={17} className="text-[#f87171] mt-0.5 shrink-0" />
             <div>
-              <div style={{ fontWeight: 700, color: "#f87171", fontSize: 14 }}>
+              <p className="font-bold text-[#f87171] text-sm">
                 {alertCount} producto{alertCount > 1 ? "s" : ""} con stock bajo o agotado
-              </div>
-              <div style={{ fontSize: 12, color: "#8b949e", marginTop: 3 }}>
-                {[...emptyStock, ...lowStock]
-                  .map(p => `${p.name} (${p.stock} ${p.unit})`)
-                  .join(" · ")}
-              </div>
+              </p>
+              <p className="text-xs text-[#8b949e] mt-0.5">
+                {[...emptyStock, ...lowStock].map(p => `${p.name} (${p.stock} ${p.unit})`).join(" · ")}
+              </p>
             </div>
           </div>
         )}
 
         {/* Filtros */}
-        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-          <div style={{
-            display: "flex", alignItems: "center", gap: 8,
-            background: "#1c2128", border: "1px solid rgba(255,255,255,0.08)",
-            borderRadius: 8, padding: "7px 12px", width: 220,
-          }}>
-            <Search size={13} color="#8b949e" />
+        <div className="flex gap-2.5 items-center flex-wrap">
+          <div className="flex items-center gap-2 bg-[#1c2128] border border-white/8 rounded-lg px-3 py-[7px] w-[220px]">
+            <Search size={13} className="text-[#8b949e]" />
             <input
               value={search}
               onChange={e => setSearch(e.target.value)}
               placeholder="Buscar producto..."
-              style={{ background: "none", border: "none", color: "#8b949e", fontSize: 13, width: "100%", outline: "none" }}
+              className="bg-transparent border-none text-[#8b949e] text-[13px] w-full outline-none"
             />
           </div>
-          <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+          <div className="flex gap-1.5 flex-wrap">
             {["Todas", ...categories.map(c => c.name)].map(c => (
-              <button key={c} onClick={() => setCatFilter(c)} style={{
-                padding: "6px 13px", borderRadius: 8, fontSize: 13, fontWeight: 500,
-                background: catFilter === c ? "#f97316" : "#1c2128",
-                color:      catFilter === c ? "#fff"    : "#8b949e",
-                border: `1px solid ${catFilter === c ? "#f97316" : "rgba(255,255,255,0.08)"}`,
-                cursor: "pointer", transition: "all 0.15s",
-              }}>{c}</button>
+              <button
+                key={c}
+                onClick={() => setCatFilter(c)}
+                className={`px-3 py-1.5 rounded-lg text-[13px] font-medium border cursor-pointer transition-all ${
+                  catFilter === c
+                    ? "bg-orange-500 text-white border-orange-500"
+                    : "bg-[#1c2128] text-[#8b949e] border-white/8 hover:border-orange-500/50"
+                }`}
+              >
+                {c}
+              </button>
             ))}
           </div>
         </div>
 
         {/* Tabla */}
-        <div style={{
-          background: "#1c2128",
-          border: "1px solid rgba(255,255,255,0.08)",
-          borderRadius: 12, overflowY: "auto",
-          
-        }}>
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+        <div className="bg-[#1c2128] border border-white/8 rounded-xl overflow-y-auto">
+          <table className="w-full border-collapse">
             <thead>
-              <tr style={{ borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
-                {["Producto", "Categoría", "Precio", "Stock", "Unidad", "Estado", ""].map(h => (
-                  <th key={h} style={{
-                    textAlign: "left", padding: "11px 16px",
-                    fontSize: 11, fontWeight: 700,
-                    color: "#484f58", textTransform: "uppercase", letterSpacing: 0.6,
-                  }}>{h}</th>
+              <tr className="border-b border-white/8">
+                {["Producto","Categoría","Precio","Stock","Unidad","Estado",""].map(h => (
+                  <th key={h} className="text-left px-4 py-[11px] text-[11px] font-bold text-[#484f58] uppercase tracking-[0.6px]">
+                    {h}
+                  </th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {filtered.map((p, i) => (
-                <tr key={p.id}
-                  style={{
-                    borderBottom: i < filtered.length - 1
-                      ? "1px solid rgba(255,255,255,0.05)" : "none",
-                    transition: "background 0.1s",
-                  }}
-                  onMouseEnter={e => (e.currentTarget.style.background = "rgba(255,255,255,0.03)")}
-                  onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
+                <tr
+                  key={p.id}
+                  className="transition-colors duration-100 hover:bg-white/[0.03]"
+                  style={{ borderBottom: i < filtered.length - 1 ? "1px solid rgba(255,255,255,0.05)" : "none" }}
                 >
-                  <td style={{ padding: "11px 16px" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                      <div style={{
-                        width: 30, height: 30, borderRadius: 7,
-                        background: "#0d1117", display: "flex",
-                        alignItems: "center", justifyContent: "center",
-                        color: "#f97316", flexShrink: 0,
-                      }}>
+                  <td className="px-4 py-[11px]">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-[30px] h-[30px] rounded-[7px] bg-[#0d1117] flex items-center justify-center text-orange-500 shrink-0">
                         <Package size={13} />
                       </div>
-                      <span style={{ fontWeight: 600, color: "#e6edf3", fontSize: 14 }}>{p.name}</span>
+                      <span className="font-semibold text-[#e6edf3] text-sm">{p.name}</span>
                     </div>
                   </td>
-                  <td style={{ padding: "11px 16px", color: "#8b949e", fontSize: 13 }}>
-                    {p.category?.name ?? "–"}
-                  </td>
-                  <td style={{ padding: "11px 16px", fontWeight: 600, color: "#e6edf3" }}>
-                    ${p.price.toLocaleString()}
-                  </td>
-                  <td style={{ padding: "11px 16px" }}>
-                    <span style={{
-                      fontWeight: 800, fontSize: 15,
-                      color: p.stock === 0 ? "#f87171" : p.stock <= p.minStock ? "#fbbf24" : "#22c55e",
-                    }}>
+                  <td className="px-4 py-[11px] text-[#8b949e] text-[13px]">{p.category?.name ?? "–"}</td>
+                  <td className="px-4 py-[11px] font-semibold text-[#e6edf3]">${p.price.toLocaleString()}</td>
+                  <td className="px-4 py-[11px]">
+                    <span className={`font-extrabold text-[15px] ${
+                      p.stock === 0 ? "text-[#f87171]" : p.stock <= p.minStock ? "text-amber-400" : "text-green-400"
+                    }`}>
                       {p.stock}
                     </span>
-                    <span style={{ color: "#484f58", fontSize: 11 }}> / {p.minStock} mín</span>
+                    <span className="text-[#484f58] text-[11px]"> / {p.minStock} mín</span>
                   </td>
-                  <td style={{ padding: "11px 16px", color: "#8b949e", fontSize: 13 }}>{p.unit}</td>
-                  <td style={{ padding: "11px 16px" }}>
-                    <Badge type={getStatus(p)} />
-                  </td>
-                  <td style={{ padding: "11px 16px" }}>
-                    <div style={{ display: "flex", gap: 10 }}>
-                      <button onClick={() => openEdit(p)}
-                        style={{ color: "#484f58", cursor: "pointer", border: "none", background: "none", transition: "color 0.15s" }}
-                        onMouseEnter={e => (e.currentTarget.style.color = "#60a5fa")}
-                        onMouseLeave={e => (e.currentTarget.style.color = "#484f58")}
+                  <td className="px-4 py-[11px] text-[#8b949e] text-[13px]">{p.unit}</td>
+                  <td className="px-4 py-[11px]"><Badge type={getStatus(p)} /></td>
+                  <td className="px-4 py-[11px]">
+                    <div className="flex gap-2.5">
+                      <button
+                        onClick={() => openEdit(p)}
+                        className="text-[#484f58] hover:text-blue-400 cursor-pointer border-none bg-transparent transition-colors"
                       >
                         <Pencil size={14} />
                       </button>
-                      <button onClick={() => confirmDelete(p)}
-                        style={{ color: "#484f58", cursor: "pointer", border: "none", background: "none", transition: "color 0.15s" }}
-                        onMouseEnter={e => (e.currentTarget.style.color = "#f87171")}
-                        onMouseLeave={e => (e.currentTarget.style.color = "#484f58")}
+                      <button
+                        onClick={() => confirmDelete(p)}
+                        className="text-[#484f58] hover:text-[#f87171] cursor-pointer border-none bg-transparent transition-colors"
                       >
                         <Trash2 size={14} />
                       </button>
@@ -342,7 +306,7 @@ export default function InventoryPage() {
               ))}
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={7} style={{ padding: 40, textAlign: "center", color: "#484f58", fontSize: 14 }}>
+                  <td colSpan={7} className="py-10 text-center text-[#484f58] text-sm">
                     No hay productos que coincidan
                   </td>
                 </tr>
@@ -352,135 +316,75 @@ export default function InventoryPage() {
         </div>
       </div>
 
-      {/* ── Modal crear / editar ──────────────────────────── */}
+      {/* ── Modal crear / editar producto ─────────────────── */}
       {modal && (
-        <div style={{
-          position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)",
-          display: "flex", alignItems: "center", justifyContent: "center",
-          zIndex: 50, padding: 20,
-        }}>
-          <div className="scale-in" style={{
-            background: "#161b22",
-            border: "1px solid rgba(255,255,255,0.08)",
-            borderRadius: 14, width: "100%", maxWidth: 520,
-          }}>
-            {/* Header */}
-            <div style={{
-              padding: "18px 22px",
-              borderBottom: "1px solid rgba(255,255,255,0.08)",
-              display: "flex", alignItems: "center", justifyContent: "space-between",
-            }}>
-              <div style={{ fontWeight: 700, fontSize: 17, color: "#e6edf3" }}>
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-5">
+          <div className="scale-in bg-[#161b22] border border-white/8 rounded-[14px] w-full max-w-[520px]">
+            <div className="px-[22px] py-[18px] border-b border-white/8 flex items-center justify-between">
+              <p className="font-bold text-[17px] text-[#e6edf3]">
                 {editing ? "Editar producto" : "Nuevo producto"}
-              </div>
-              <button onClick={() => setModal(false)}
-                style={{ color: "#8b949e", cursor: "pointer", border: "none", background: "none" }}>
+              </p>
+              <button onClick={() => setModal(false)} className="text-[#8b949e] cursor-pointer border-none bg-transparent">
                 <X size={20} />
               </button>
             </div>
 
-            {/* Form */}
-            <form onSubmit={handleSubmit} style={{ padding: 22, display: "flex", flexDirection: "column", gap: 14 }}>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+            <form onSubmit={handleSubmit} className="p-[22px] flex flex-col gap-3.5">
+              <div className="grid grid-cols-2 gap-3.5">
 
-                {/* Nombre */}
-                <div style={{ gridColumn: "1 / -1" }}>
-                  <label style={{ fontSize: 11, fontWeight: 700, color: "#484f58", marginBottom: 5, display: "block", textTransform: "uppercase", letterSpacing: 0.5 }}>
-                    Nombre
-                  </label>
-                  <input
-                    style={iSt} required
-                    value={form.name}
+                <div className="col-span-2">
+                  <label className="block text-[11px] font-bold text-[#484f58] mb-1.5 uppercase tracking-[0.5px]">Nombre</label>
+                  <input className={inputCls} required value={form.name}
                     onChange={e => setForm({ ...form, name: e.target.value })}
-                    placeholder="Ej. Pollo a la plancha"
-                  />
+                    placeholder="Ej. Pollo a la plancha" />
                 </div>
 
-                {/* Precio */}
                 <div>
-                  <label style={{ fontSize: 11, fontWeight: 700, color: "#484f58", marginBottom: 5, display: "block", textTransform: "uppercase", letterSpacing: 0.5 }}>
-                    Precio
-                  </label>
-                  <input
-                    type="number" min="0" style={iSt} required
-                    value={form.price}
-                    onChange={e => setForm({ ...form, price: e.target.value })}
-                    placeholder="0"
-                  />
+                  <label className="block text-[11px] font-bold text-[#484f58] mb-1.5 uppercase tracking-[0.5px]">Precio</label>
+                  <input type="number" min="0" className={inputCls} required value={form.price}
+                    onChange={e => setForm({ ...form, price: e.target.value })} placeholder="0" />
                 </div>
 
-                {/* Stock */}
                 <div>
-                  <label style={{ fontSize: 11, fontWeight: 700, color: "#484f58", marginBottom: 5, display: "block", textTransform: "uppercase", letterSpacing: 0.5 }}>
-                    Stock actual
-                  </label>
-                  <input
-                    type="number" min="0" style={iSt} required
-                    value={form.stock}
-                    onChange={e => setForm({ ...form, stock: e.target.value })}
-                    placeholder="0"
-                  />
+                  <label className="block text-[11px] font-bold text-[#484f58] mb-1.5 uppercase tracking-[0.5px]">Stock actual</label>
+                  <input type="number" min="0" className={inputCls} required value={form.stock}
+                    onChange={e => setForm({ ...form, stock: e.target.value })} placeholder="0" />
                 </div>
 
-                {/* Stock mínimo */}
                 <div>
-                  <label style={{ fontSize: 11, fontWeight: 700, color: "#484f58", marginBottom: 5, display: "block", textTransform: "uppercase", letterSpacing: 0.5 }}>
-                    Stock mínimo
-                  </label>
-                  <input
-                    type="number" min="0" style={iSt} required
-                    value={form.minStock}
-                    onChange={e => setForm({ ...form, minStock: e.target.value })}
-                    placeholder="5"
-                  />
+                  <label className="block text-[11px] font-bold text-[#484f58] mb-1.5 uppercase tracking-[0.5px]">Stock mínimo</label>
+                  <input type="number" min="0" className={inputCls} required value={form.minStock}
+                    onChange={e => setForm({ ...form, minStock: e.target.value })} placeholder="5" />
                 </div>
 
-                {/* Unidad */}
                 <div>
-                  <label style={{ fontSize: 11, fontWeight: 700, color: "#484f58", marginBottom: 5, display: "block", textTransform: "uppercase", letterSpacing: 0.5 }}>
-                    Unidad
-                  </label>
-                  <select style={iSt} value={form.unit} onChange={e => setForm({ ...form, unit: e.target.value })}>
+                  <label className="block text-[11px] font-bold text-[#484f58] mb-1.5 uppercase tracking-[0.5px]">Unidad</label>
+                  <select className={inputCls} value={form.unit} onChange={e => setForm({ ...form, unit: e.target.value })}>
                     {UNITS.map(u => <option key={u} value={u}>{u}</option>)}
                   </select>
                 </div>
 
-                {/* Categoría */}
-                <div>
-                  <label style={{ fontSize: 11, fontWeight: 700, color: "#484f58", marginBottom: 5, display: "block", textTransform: "uppercase", letterSpacing: 0.5 }}>
-                    Categoría
-                  </label>
-                  <select
-                    style={iSt} required
-                    value={form.categoryId}
-                    onChange={e => setForm({ ...form, categoryId: e.target.value })}
-                  >
+                <div className="col-span-2">
+                  <label className="block text-[11px] font-bold text-[#484f58] mb-1.5 uppercase tracking-[0.5px]">Categoría</label>
+                  <select className={inputCls} required value={form.categoryId}
+                    onChange={e => setForm({ ...form, categoryId: e.target.value })}>
                     <option value="">Seleccionar...</option>
-                    {categories.map(c => (
-                      <option key={c.id} value={c.id}>{c.name}</option>
-                    ))}
+                    {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                   </select>
                 </div>
               </div>
 
-              {/* Botones */}
-              <div style={{ display: "flex", gap: 10, paddingTop: 4 }}>
-                <button type="submit" disabled={saving} style={{
-                  flex: 1, padding: "11px", borderRadius: 9,
-                  background: "#f97316", color: "#fff",
-                  fontWeight: 700, fontSize: 14, border: "none",
-                  cursor: saving ? "wait" : "pointer",
-                  opacity: saving ? 0.7 : 1, transition: "all 0.15s",
-                }}>
+              <div className="flex gap-2.5 pt-1">
+                <button
+                  type="submit" disabled={saving}
+                  className="flex-1 py-[11px] rounded-[9px] bg-orange-500 text-white font-bold text-sm border-none cursor-pointer hover:bg-orange-600 transition-colors disabled:opacity-70 disabled:cursor-wait"
+                >
                   {saving ? "Guardando..." : editing ? "Guardar cambios" : "Crear producto"}
                 </button>
-                <button type="button" onClick={() => setModal(false)} style={{
-                  flex: 1, padding: "11px", borderRadius: 9,
-                  background: "transparent",
-                  border: "1px solid rgba(255,255,255,0.08)",
-                  color: "#8b949e", fontWeight: 600, fontSize: 14,
-                  cursor: "pointer", transition: "all 0.15s",
-                }}>
+                <button
+                  type="button" onClick={() => setModal(false)}
+                  className="flex-1 py-[11px] rounded-[9px] bg-transparent border border-white/8 text-[#8b949e] font-semibold text-sm cursor-pointer hover:bg-white/5 transition-colors"
+                >
                   Cancelar
                 </button>
               </div>
@@ -489,48 +393,87 @@ export default function InventoryPage() {
         </div>
       )}
 
-      {/* ── Modal confirmar eliminar ──────────────────────── */}
+      {/* ── Modal categorías ──────────────────────────────── */}
+      {catModal && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-5">
+          <div className="scale-in bg-[#161b22] border border-white/8 rounded-[14px] w-full max-w-[420px]">
+            <div className="px-[22px] py-[18px] border-b border-white/8 flex items-center justify-between">
+              <p className="font-bold text-[17px] text-[#e6edf3]">Gestionar categorías</p>
+              <button onClick={() => setCatModal(false)} className="text-[#8b949e] cursor-pointer border-none bg-transparent">
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="p-[22px] flex flex-col gap-4">
+              <form onSubmit={handleCreateCategory} className="flex gap-2">
+                <input
+                  className={`${inputCls} flex-1`}
+                  value={newCatName}
+                  onChange={e => setNewCatName(e.target.value)}
+                  placeholder="Nueva categoría (ej. Postres)"
+                  required
+                />
+                <button
+                  type="submit" disabled={savingCat}
+                  className="px-4 py-[9px] rounded-lg bg-orange-500 text-white font-bold text-sm border-none cursor-pointer hover:bg-orange-600 transition-colors disabled:opacity-70 disabled:cursor-wait"
+                >
+                  <Plus size={14} />
+                </button>
+              </form>
+
+              <div className="bg-[#0d1117] border border-white/8 rounded-[10px] overflow-hidden">
+                {categories.length === 0 && (
+                  <p className="py-5 text-center text-[#484f58] text-[13px]">No hay categorías creadas</p>
+                )}
+                {categories.map((c, i) => {
+                  const count = products.filter(p => p.categoryId === c.id).length
+                  return (
+                    <div
+                      key={c.id}
+                      className="flex items-center justify-between px-4 py-[11px]"
+                      style={{ borderBottom: i < categories.length - 1 ? "1px solid rgba(255,255,255,0.05)" : "none" }}
+                    >
+                      <div>
+                        <span className="text-[#e6edf3] font-semibold text-sm">{c.name}</span>
+                        <span className="text-[#484f58] text-xs ml-2">{count} producto{count !== 1 ? "s" : ""}</span>
+                      </div>
+                      <button
+                        onClick={() => handleDeleteCategory(c.id, c.name)}
+                        className="text-[#484f58] hover:text-[#f87171] bg-transparent border-none cursor-pointer flex transition-colors"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal confirmar eliminar producto ─────────────── */}
       {delModal && delTarget && (
-        <div style={{
-          position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)",
-          display: "flex", alignItems: "center", justifyContent: "center",
-          zIndex: 50, padding: 20,
-        }}>
-          <div className="scale-in" style={{
-            background: "#161b22",
-            border: "1px solid rgba(255,255,255,0.08)",
-            borderRadius: 14, width: "100%", maxWidth: 380, padding: 24,
-            textAlign: "center",
-          }}>
-            <div style={{
-              width: 44, height: 44, borderRadius: "50%",
-              background: "rgba(248,113,113,0.13)",
-              display: "flex", alignItems: "center", justifyContent: "center",
-              margin: "0 auto 14px",
-            }}>
-              <Trash2 size={20} color="#f87171" />
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-5">
+          <div className="scale-in bg-[#161b22] border border-white/8 rounded-[14px] w-full max-w-[380px] p-6 text-center">
+            <div className="w-11 h-11 rounded-full bg-red-400/[0.13] flex items-center justify-center mx-auto mb-3.5">
+              <Trash2 size={20} className="text-[#f87171]" />
             </div>
-            <div style={{ fontWeight: 700, fontSize: 16, color: "#e6edf3", marginBottom: 8 }}>
-              ¿Eliminar producto?
-            </div>
-            <p style={{ color: "#8b949e", fontSize: 14, marginBottom: 20 }}>
-              Vas a eliminar <span style={{ color: "#e6edf3", fontWeight: 600 }}>"{delTarget.name}"</span>. Esta acción no se puede deshacer.
+            <p className="font-bold text-[16px] text-[#e6edf3] mb-2">¿Eliminar producto?</p>
+            <p className="text-[#8b949e] text-sm mb-5">
+              Vas a eliminar <span className="text-[#e6edf3] font-semibold">"{delTarget.name}"</span>. Esta acción no se puede deshacer.
             </p>
-            <div style={{ display: "flex", gap: 10 }}>
-              <button onClick={() => setDelModal(false)} style={{
-                flex: 1, padding: "10px", borderRadius: 9,
-                background: "transparent",
-                border: "1px solid rgba(255,255,255,0.08)",
-                color: "#8b949e", fontWeight: 600, fontSize: 14, cursor: "pointer",
-              }}>
+            <div className="flex gap-2.5">
+              <button
+                onClick={() => setDelModal(false)}
+                className="flex-1 py-2.5 rounded-[9px] bg-transparent border border-white/8 text-[#8b949e] font-semibold text-sm cursor-pointer hover:bg-white/5 transition-colors"
+              >
                 Cancelar
               </button>
-              <button onClick={handleDelete} style={{
-                flex: 1, padding: "10px", borderRadius: 9,
-                background: "rgba(248,113,113,0.15)",
-                border: "1px solid rgba(248,113,113,0.25)",
-                color: "#f87171", fontWeight: 700, fontSize: 14, cursor: "pointer",
-              }}>
+              <button
+                onClick={handleDelete}
+                className="flex-1 py-2.5 rounded-[9px] bg-red-400/[0.15] border border-red-400/25 text-[#f87171] font-bold text-sm cursor-pointer hover:bg-red-400/25 transition-colors"
+              >
                 Sí, eliminar
               </button>
             </div>

@@ -14,6 +14,10 @@ export const closeDayForRestaurant = async (restaurantId: string): Promise<Close
     where: { restaurantId_date: { restaurantId, date: today } },
   })
   if (existing) {
+    await prisma.order.updateMany({
+      where: { restaurantId, status: "CERRADA", createdAt: { gte: today, lt: tomorrow } },
+      data: { status: "ARCHIVADA" },
+    })
     return { kind: "idempotent", summary: existing }
   }
 

@@ -1,8 +1,6 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { Card, CardContent } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
 import { UtensilsCrossed, Plus, Trash2, X, ShoppingBag, CheckCircle, Minus, Search } from "lucide-react"
 import api from "@/lib/axios"
 import { useCurrentUser, authHeaders } from "@/lib/auth"
@@ -23,21 +21,21 @@ type ConfirmModal = {
 }
 
 export default function TablesPage() {
-  const [tables, setTables] = useState<Table[]>([])
-  const [products, setProducts] = useState<Product[]>([])
-  const { token, restaurantId } = useCurrentUser()
+  const [tables,        setTables]        = useState<Table[]>([])
+  const [products,      setProducts]      = useState<Product[]>([])
   const [selectedTable, setSelectedTable] = useState<Table | null>(null)
-  const [activeOrder, setActiveOrder] = useState<Order | null>(null)
-  const [drawerOpen, setDrawerOpen] = useState(false)
-  const [loading, setLoading] = useState(false)
-  const [paymentMethod, setPaymentMethod] = useState<string>("")
-  const [showPayment, setShowPayment] = useState(false)
-  const [confirmModal, setConfirmModal] = useState<ConfirmModal | null>(null)
-
-  const [quantities, setQuantities] = useState<Record<string, number>>({})
-  const [tipAmount, setTipAmount] = useState<number>(0)
-  const [tableSearch, setTableSearch] = useState("")
+  const [activeOrder,   setActiveOrder]   = useState<Order | null>(null)
+  const [drawerOpen,    setDrawerOpen]    = useState(false)
+  const [loading,       setLoading]       = useState(false)
+  const [paymentMethod, setPaymentMethod] = useState("")
+  const [showPayment,   setShowPayment]   = useState(false)
+  const [confirmModal,  setConfirmModal]  = useState<ConfirmModal | null>(null)
+  const [quantities,    setQuantities]    = useState<Record<string, number>>({})
+  const [tipAmount,     setTipAmount]     = useState(0)
+  const [tableSearch,   setTableSearch]   = useState("")
   const [productSearch, setProductSearch] = useState("")
+
+  const { token, restaurantId } = useCurrentUser()
 
   useEffect(() => {
     if (!restaurantId || !token) return
@@ -55,49 +53,78 @@ export default function TablesPage() {
     setProducts(res.data)
   }
 
-  const fetchActiveOrder = async (tableId: string) => {
-    const res = await api.get(`/orders/table/${tableId}`, { headers: authHeaders() })
-    setActiveOrder(res.data)
-  }
-
   const handleTableClick = async (table: Table) => {
     setSelectedTable(table)
     setLoading(true)
-
     const existingRes = await api.get(`/orders/table/${table.id}`, { headers: authHeaders() })
     const existingOrder = existingRes.data
-
     if (existingOrder) {
       setActiveOrder(existingOrder)
     } else {
       const res = await api.post("/orders", { tableId: table.id, restaurantId }, { headers: authHeaders() })
       setActiveOrder(res.data)
     }
-
     setLoading(false)
     setDrawerOpen(true)
   }
 
   const handleAddProduct = async (productId: string, quantity: number) => {
     if (!activeOrder) return
+
+    const product = products.find(p => p.id === productId)
+    if (!product) return
+
+    const prevOrder = activeOrder
+    const existingItem = activeOrder.items?.find((i: OrderItem) => i.product.id === productId)
+
+    const optimisticItems = existingItem
+      ? activeOrder.items.map((i: OrderItem) =>
+          i.product.id === productId ? { ...i, quantity: i.quantity + quantity } : i
+        )
+      : [
+          ...(activeOrder.items ?? []),
+          {
+            id: `temp-${productId}`,
+            orderId: activeOrder.id,
+            productId,
+            quantity,
+            unitPrice: product.price,
+            product,
+          } as OrderItem,
+        ]
+
+    const optimisticTotal = optimisticItems.reduce(
+      (sum: number, i: OrderItem) => sum + i.unitPrice * i.quantity, 0
+    )
+
+    setActiveOrder({ ...activeOrder, items: optimisticItems, total: optimisticTotal })
+    setQuantities(q => ({ ...q, [productId]: 1 }))
+    setTables(prev => prev.map(t => t.id === selectedTable?.id ? { ...t, status: "OCUPADA" } : t))
+    setSelectedTable(prev => prev ? { ...prev, status: "OCUPADA" } : prev)
+
     try {
-      await api.post(`/orders/${activeOrder.id}/items`, { productId, quantity }, { headers: authHeaders() })
-      const res = await api.get(`/orders/${activeOrder.id}`, { headers: authHeaders() })
-      setActiveOrder(res.data)
-      setQuantities(q => ({ ...q, [productId]: 1 }))
-      setTables(prev => prev.map(t => t.id === selectedTable?.id ? { ...t, status: "OCUPADA" } : t))
-      setSelectedTable(prev => prev ? { ...prev, status: "OCUPADA" } : prev)
+      const { data: savedItem } = await api.post(
+        `/orders/${activeOrder.id}/items`,
+        { productId, quantity },
+        { headers: authHeaders() }
+      )
+      setActiveOrder(prev => {
+        if (!prev) return prev
+        const items = prev.items.map((i: OrderItem) =>
+          i.id === `temp-${productId}` ? { ...savedItem, product } : i
+        )
+        const total = items.reduce((sum: number, i: OrderItem) => sum + i.unitPrice * i.quantity, 0)
+        return { ...prev, items, total }
+      })
     } catch (error: any) {
+      setActiveOrder(prevOrder)
       alert(error?.response?.data?.message || "Error al agregar producto")
     }
   }
 
   const handleCloseOrder = async () => {
     if (!activeOrder) return
-    await api.patch(`/orders/${activeOrder.id}/close`, {
-      paymentMethod,
-      tip: tipAmount,
-    }, { headers: authHeaders() })
+    await api.patch(`/orders/${activeOrder.id}/close`, { paymentMethod, tip: tipAmount }, { headers: authHeaders() })
     setDrawerOpen(false)
     setActiveOrder(null)
     setSelectedTable(null)
@@ -133,13 +160,8 @@ export default function TablesPage() {
     setActiveOrder(res.data)
   }
 
-  const getQty = (productId: string) => quantities[productId] ?? 1
-  const changeQty = (productId: string, delta: number) => {
-    setQuantities(q => ({ ...q, [productId]: Math.max(1, (q[productId] ?? 1) + delta) }))
-  }
-
   const handleDrawerClose = () => {
-    if (activeOrder && activeOrder.items && activeOrder.items.length > 0) {
+    if (activeOrder?.items?.length) {
       setConfirmModal({
         title: "¿Cerrar sin guardar?",
         message: "La mesa tiene productos añadidos. ¿Deseas cerrar el panel? La orden quedará abierta y podrás retomar desde la mesa.",
@@ -156,93 +178,91 @@ export default function TablesPage() {
     }
   }
 
-  const subtotal = activeOrder?.total ?? 0
+  const getQty = (productId: string) => quantities[productId] ?? 1
+  const changeQty = (productId: string, delta: number) =>
+    setQuantities(q => ({ ...q, [productId]: Math.max(1, (q[productId] ?? 1) + delta) }))
+
+  const subtotal       = activeOrder?.total ?? 0
   const totalConPropina = subtotal + tipAmount
 
-  const filteredTables = tables.filter(t =>
-    t.number.toString().includes(tableSearch.trim())
-  )
+  const filteredTables   = tables.filter(t => t.number.toString().includes(tableSearch.trim()))
   const filteredProducts = products.filter(p =>
     p.name.toLowerCase().includes(productSearch.toLowerCase().trim()) ||
     p.category?.name.toLowerCase().includes(productSearch.toLowerCase().trim())
   )
 
   const disponibles = tables.filter(t => t.status === "DISPONIBLE").length
-  const ocupadas = tables.filter(t => t.status === "OCUPADA").length
+  const ocupadas    = tables.filter(t => t.status === "OCUPADA").length
 
   return (
-    <div className="p-8 space-y-6">
+    <div className="flex flex-col h-screen overflow-hidden">
+      <div className="flex-1 overflow-y-auto px-7 py-6 flex flex-col gap-6">
 
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold text-white">Mesas</h1>
-          <p className="text-slate-400 mt-1">
-            {disponibles} disponibles · {ocupadas} ocupadas
-          </p>
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-[21px] font-extrabold text-[#e6edf3]">Mesas</h1>
+            <p className="text-sm text-[#8b949e] mt-1">{disponibles} disponibles · {ocupadas} ocupadas</p>
+          </div>
+          <button
+            onClick={handleAddTable}
+            className="flex items-center gap-2 px-4 py-[9px] rounded-[9px] bg-orange-500 text-white font-bold text-sm border-none cursor-pointer shadow-[0_0_12px_#f9731640] hover:bg-orange-600 transition-colors"
+          >
+            <Plus size={15} /> Nueva mesa
+          </button>
         </div>
-        <Button onClick={handleAddTable} className="bg-orange-500 hover:bg-orange-600 text-white">
-          <Plus className="h-4 w-4 mr-2" /> Nueva mesa
-        </Button>
-      </div>
 
-      {/* Buscador de mesas */}
-      <div style={{ position: "relative", maxWidth: 240 }}>
-        <Search style={{ position: "absolute", left: 11, top: "50%", transform: "translateY(-50%)", width: 14, height: 14, color: "#8b949e" }} />
-        <input
-          type="text"
-          value={tableSearch}
-          onChange={e => setTableSearch(e.target.value)}
-          placeholder="Buscar mesa..."
-          aria-label="Buscar mesa por número"
-          style={{
-            width: "100%", background: "#1c2128", color: "#e6edf3",
-            borderRadius: 8, paddingLeft: 34, paddingRight: 14, paddingTop: 8, paddingBottom: 8,
-            fontSize: 13, border: "1px solid rgba(255,255,255,0.08)",
-            outline: "none", boxSizing: "border-box",
-          }}
-        />
-      </div>
+        {/* Buscador de mesas */}
+        <div className="relative max-w-[240px]">
+          <Search className="absolute left-[11px] top-1/2 -translate-y-1/2 text-[#8b949e]" size={14} />
+          <input
+            type="text"
+            value={tableSearch}
+            onChange={e => setTableSearch(e.target.value)}
+            placeholder="Buscar mesa..."
+            aria-label="Buscar mesa por número"
+            className="w-full bg-[#1c2128] text-[#e6edf3] rounded-lg pl-[34px] pr-3.5 py-2 text-[13px] border border-white/8 outline-none"
+          />
+        </div>
 
-      {/* Grid de mesas */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-4">
-        {filteredTables.map(table => {
-          const isOcupada = table.status === "OCUPADA"
-          return (
-            <Card
-              key={table.id}
-              onClick={() => handleTableClick(table)}
-              className={`border-2 cursor-pointer transition-all hover:scale-105 ${
-                isOcupada
-                  ? "bg-orange-500/10 border-orange-500"
-                  : "bg-slate-800 border-slate-700 hover:border-green-500"
-              }`}
-            >
-              <CardContent className="p-4 space-y-3">
+        {/* Grid de mesas */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-4">
+          {filteredTables.map(table => {
+            const isOcupada = table.status === "OCUPADA"
+            return (
+              <div
+                key={table.id}
+                onClick={() => handleTableClick(table)}
+                className={`rounded-xl border-2 cursor-pointer transition-all hover:scale-105 p-4 flex flex-col gap-3 ${
+                  isOcupada
+                    ? "bg-orange-500/10 border-orange-500"
+                    : "bg-[#1c2128] border-[#30363d] hover:border-green-500"
+                }`}
+              >
                 <div className="flex items-center justify-between">
-                  <div className={`p-2 rounded-lg ${isOcupada ? "bg-orange-500/20" : "bg-slate-700"}`}>
-                    <UtensilsCrossed className={`h-5 w-5 ${isOcupada ? "text-orange-400" : "text-slate-400"}`} />
+                  <div className={`p-2 rounded-lg ${isOcupada ? "bg-orange-500/20" : "bg-[#21262d]"}`}>
+                    <UtensilsCrossed className={`h-5 w-5 ${isOcupada ? "text-orange-400" : "text-[#8b949e]"}`} />
                   </div>
                   <button
-                    onClick={(e) => handleDeleteTable(table.id, e)}
+                    onClick={e => handleDeleteTable(table.id, e)}
                     aria-label={`Eliminar mesa ${table.number}`}
-                    className="text-slate-600 hover:text-red-400 transition-colors"
+                    className="text-[#484f58] hover:text-[#f87171] transition-colors bg-transparent border-none cursor-pointer"
                   >
-                    <Trash2 className="h-4 w-4" />
+                    <Trash2 size={16} />
                   </button>
                 </div>
                 <div>
-                  <p className="text-white font-bold text-lg">Mesa {table.number}</p>
+                  <p className="text-[#e6edf3] font-bold text-lg">Mesa {table.number}</p>
                   <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
                     isOcupada ? "bg-orange-500/20 text-orange-400" : "bg-green-500/20 text-green-400"
                   }`}>
                     {isOcupada ? "Ocupada" : "Disponible"}
                   </span>
                 </div>
-              </CardContent>
-            </Card>
-          )
-        })}
+              </div>
+            )
+          })}
+        </div>
       </div>
 
       {/* Drawer lateral */}
@@ -250,152 +270,120 @@ export default function TablesPage() {
         <div className="fixed inset-0 z-50 flex justify-end">
           <div className="absolute inset-0 bg-black/50" onClick={handleDrawerClose} aria-hidden="true" />
 
-          <div className="relative w-full max-w-md bg-slate-900 border-l border-slate-700 flex flex-col h-full overflow-hidden">
+          <div className="relative w-full max-w-md bg-[#0d1117] border-l border-white/8 flex flex-col h-full overflow-hidden">
 
-            <div className="flex items-center justify-between p-6 border-b border-slate-700">
+            {/* Drawer header */}
+            <div className="flex items-center justify-between px-6 py-5 border-b border-white/8">
               <div>
-                <h2 className="text-white font-bold text-xl">Mesa {selectedTable?.number}</h2>
-                <p className="text-slate-400 text-sm">
-                  {loading ? "Creando orden..." : `Orden #${activeOrder?.id.slice(0, 8)}`}
+                <h2 className="text-[#e6edf3] font-bold text-xl">Mesa {selectedTable?.number}</h2>
+                <p className="text-[#8b949e] text-sm mt-0.5">
+                  {loading ? "Cargando orden..." : `Orden #${activeOrder?.id.slice(0, 8) ?? "—"}`}
                 </p>
               </div>
-              <button
-                onClick={handleDrawerClose}
-                aria-label="Cerrar panel de mesa"
-                className="text-slate-400 hover:text-white"
-              >
-                <X className="h-6 w-6" />
+              <button onClick={handleDrawerClose} aria-label="Cerrar panel de mesa" className="text-[#8b949e] hover:text-[#e6edf3] bg-transparent border-none cursor-pointer transition-colors">
+                <X size={24} />
               </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-4" style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+            {/* Drawer body */}
+            <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-5">
 
               {/* Pedido actual */}
-              {activeOrder && activeOrder.items && activeOrder.items.length > 0 && (
+              {activeOrder?.items?.length ? (
                 <div>
-                  <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.8, color: "#484f58", textTransform: "uppercase", marginBottom: 10 }}>
+                  <p className="text-[11px] font-bold tracking-[0.8px] text-[#484f58] uppercase mb-2.5">
                     Pedido actual
                   </p>
-                  <div style={{ background: "#1c2128", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 12, overflow: "hidden" }}>
+                  <div className="bg-[#1c2128] border border-white/8 rounded-xl overflow-hidden">
                     {activeOrder.items.map((item: OrderItem, i: number) => (
                       <div
                         key={item.id}
-                        style={{
-                          display: "flex", alignItems: "center", justifyContent: "space-between",
-                          padding: "11px 16px",
-                          borderBottom: i < activeOrder.items.length - 1 ? "1px solid rgba(255,255,255,0.05)" : "none",
-                        }}
+                        className="flex items-center justify-between px-4 py-[11px]"
+                        style={{ borderBottom: i < activeOrder.items.length - 1 ? "1px solid rgba(255,255,255,0.05)" : "none" }}
                       >
-                        <div style={{ flex: 1 }}>
-                          <p style={{ color: "#e6edf3", fontSize: 13, fontWeight: 600 }}>{item.product.name}</p>
-                          <p style={{ color: "#8b949e", fontSize: 11, marginTop: 2 }}>
+                        <div className="flex-1">
+                          <p className="text-[#e6edf3] text-[13px] font-semibold">{item.product.name}</p>
+                          <p className="text-[#8b949e] text-[11px] mt-0.5">
                             x{item.quantity} · ${item.unitPrice.toLocaleString()} c/u
                           </p>
                         </div>
-                        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                          <span style={{ color: "#f97316", fontWeight: 700, fontSize: 14 }}>
+                        <div className="flex items-center gap-3">
+                          <span className="text-orange-500 font-bold text-sm">
                             ${(item.quantity * item.unitPrice).toLocaleString()}
                           </span>
                           <button
                             onClick={() => handleRemoveItem(item.id)}
                             aria-label={`Eliminar ${item.product.name} de la orden`}
-                            style={{ color: "#484f58", background: "none", border: "none", cursor: "pointer", display: "flex" }}
-                            onMouseEnter={e => (e.currentTarget.style.color = "#f87171")}
-                            onMouseLeave={e => (e.currentTarget.style.color = "#484f58")}
+                            className="text-[#484f58] hover:text-[#f87171] bg-transparent border-none cursor-pointer flex transition-colors"
                           >
-                            <Trash2 style={{ width: 15, height: 15 }} />
+                            <Trash2 size={15} />
                           </button>
                         </div>
                       </div>
                     ))}
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 16px", borderTop: "1px solid rgba(255,255,255,0.08)" }}>
-                      <span style={{ color: "#8b949e", fontWeight: 600, fontSize: 13 }}>Total orden</span>
-                      <span style={{ color: "#f97316", fontWeight: 800, fontSize: 16 }}>${activeOrder.total.toLocaleString()}</span>
+                    <div className="flex justify-between items-center px-4 py-3 border-t border-white/8">
+                      <span className="text-[#8b949e] font-semibold text-[13px]">Total orden</span>
+                      <span className="text-orange-500 font-extrabold text-base">${activeOrder.total.toLocaleString()}</span>
                     </div>
                   </div>
                 </div>
-              )}
+              ) : null}
 
               {/* Agregar productos */}
-              <div style={{ flex: 1 }}>
-                <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.8, color: "#484f58", textTransform: "uppercase", marginBottom: 10 }}>
+              <div className="flex-1">
+                <p className="text-[11px] font-bold tracking-[0.8px] text-[#484f58] uppercase mb-2.5">
                   Agregar productos
                 </p>
 
-                <div style={{ position: "relative", marginBottom: 12 }}>
-                  <Search style={{ position: "absolute", left: 11, top: "50%", transform: "translateY(-50%)", width: 14, height: 14, color: "#8b949e" }} />
+                <div className="relative mb-3">
+                  <Search className="absolute left-[11px] top-1/2 -translate-y-1/2 text-[#8b949e]" size={14} />
                   <input
                     type="text"
                     value={productSearch}
                     onChange={e => setProductSearch(e.target.value)}
                     placeholder="Buscar por nombre o categoría..."
                     aria-label="Buscar producto"
-                    style={{
-                      width: "100%", background: "#161b22", color: "#e6edf3",
-                      borderRadius: 8, paddingLeft: 34, paddingRight: 14, paddingTop: 9, paddingBottom: 9,
-                      fontSize: 13, border: "1px solid rgba(255,255,255,0.08)",
-                      outline: "none", boxSizing: "border-box",
-                    }}
+                    className="w-full bg-[#161b22] text-[#e6edf3] rounded-lg pl-[34px] pr-3.5 py-[9px] text-[13px] border border-white/8 outline-none"
                   />
                 </div>
 
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                <div className="grid grid-cols-2 gap-2">
                   {filteredProducts.map(product => (
                     <div
                       key={product.id}
-                      style={{
-                        background: "#161b22",
-                        border: "1px solid rgba(255,255,255,0.07)",
-                        borderRadius: 10, padding: 12,
-                        display: "flex", flexDirection: "column", gap: 6,
-                      }}
+                      className="bg-[#161b22] border border-white/[0.07] rounded-[10px] p-3 flex flex-col gap-1.5"
                     >
-                      <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.4, color: "#8b949e", textTransform: "uppercase" }}>
+                      <span className="text-[10px] font-bold tracking-[0.4px] text-[#8b949e] uppercase">
                         {product.category?.name ?? "—"}
                       </span>
-                      <p style={{ color: "#e6edf3", fontWeight: 600, fontSize: 13, lineHeight: 1.3, flex: 1, margin: 0 }}>
+                      <p className="text-[#e6edf3] font-semibold text-[13px] leading-snug flex-1">
                         {product.name}
                       </p>
-                      <p style={{ color: "#f97316", fontWeight: 700, fontSize: 15, margin: 0 }}>
+                      <p className="text-orange-500 font-bold text-[15px]">
                         ${product.price.toLocaleString()}
                       </p>
-                      <div style={{ display: "flex", alignItems: "center", gap: 4, marginTop: 2 }}>
+                      <div className="flex items-center gap-1 mt-0.5">
                         <button
                           onClick={() => changeQty(product.id, -1)}
                           aria-label={`Reducir cantidad de ${product.name}`}
-                          style={{
-                            background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.08)",
-                            color: "#e6edf3", borderRadius: 6, width: 26, height: 26,
-                            display: "flex", alignItems: "center", justifyContent: "center",
-                            cursor: "pointer", flexShrink: 0,
-                          }}
+                          className="w-[26px] h-[26px] flex items-center justify-center bg-white/[0.06] border border-white/8 text-[#e6edf3] rounded-[6px] cursor-pointer shrink-0 hover:bg-white/10 transition-colors"
                         >
-                          <Minus style={{ width: 11, height: 11 }} />
+                          <Minus size={11} />
                         </button>
-                        <span style={{ color: "#e6edf3", fontWeight: 700, fontSize: 13, width: 20, textAlign: "center" }}>
+                        <span className="text-[#e6edf3] font-bold text-[13px] w-5 text-center">
                           {getQty(product.id)}
                         </span>
                         <button
                           onClick={() => changeQty(product.id, 1)}
                           aria-label={`Aumentar cantidad de ${product.name}`}
-                          style={{
-                            background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.08)",
-                            color: "#e6edf3", borderRadius: 6, width: 26, height: 26,
-                            display: "flex", alignItems: "center", justifyContent: "center",
-                            cursor: "pointer", flexShrink: 0,
-                          }}
+                          className="w-[26px] h-[26px] flex items-center justify-center bg-white/[0.06] border border-white/8 text-[#e6edf3] rounded-[6px] cursor-pointer shrink-0 hover:bg-white/10 transition-colors"
                         >
-                          <Plus style={{ width: 11, height: 11 }} />
+                          <Plus size={11} />
                         </button>
                         <button
                           onClick={() => handleAddProduct(product.id, getQty(product.id))}
                           aria-label={`Agregar ${product.name} a la orden`}
-                          style={{
-                            flex: 1, background: "rgba(249,115,22,0.15)",
-                            border: "1px solid rgba(249,115,22,0.3)",
-                            color: "#f97316", borderRadius: 6, padding: "5px 0",
-                            fontSize: 11, fontWeight: 700, cursor: "pointer",
-                          }}
+                          className="flex-1 bg-orange-500/15 border border-orange-500/30 text-orange-500 rounded-[6px] py-[5px] text-[11px] font-bold cursor-pointer hover:bg-orange-500/25 transition-colors"
                         >
                           + Agregar
                         </button>
@@ -404,7 +392,7 @@ export default function TablesPage() {
                   ))}
 
                   {filteredProducts.length === 0 && (
-                    <div style={{ gridColumn: "1 / -1", textAlign: "center", padding: "24px 0", color: "#484f58", fontSize: 13 }}>
+                    <div className="col-span-2 text-center py-6 text-[#484f58] text-[13px]">
                       Sin resultados
                     </div>
                   )}
@@ -412,41 +400,38 @@ export default function TablesPage() {
               </div>
             </div>
 
-            {/* Footer */}
-            <div className="p-4 border-t border-slate-700 space-y-3">
+            {/* Drawer footer */}
+            <div className="p-4 border-t border-white/8 flex flex-col gap-3">
               {!showPayment ? (
                 <>
-                  <Button
+                  <button
                     onClick={() => setShowPayment(true)}
-                    className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3"
+                    className="w-full flex items-center justify-center gap-2 bg-green-600 hover:bg-green-700 text-white font-bold py-3 rounded-xl border-none cursor-pointer transition-colors text-sm"
                   >
-                    <CheckCircle className="h-5 w-5 mr-2" />
+                    <CheckCircle size={20} />
                     Cerrar cuenta · ${activeOrder?.total.toLocaleString() ?? 0}
-                  </Button>
-                  <Button
-                    variant="outline"
+                  </button>
+                  <button
                     onClick={handleDrawerClose}
-                    className="w-full border-slate-600 text-slate-300 hover:bg-slate-800"
+                    className="w-full flex items-center justify-center gap-2 bg-transparent border border-white/8 text-[#8b949e] hover:bg-white/5 font-semibold py-3 rounded-xl cursor-pointer transition-colors text-sm"
                   >
-                    <ShoppingBag className="h-5 w-5 mr-2" />
+                    <ShoppingBag size={20} />
                     Seguir agregando
-                  </Button>
+                  </button>
                 </>
               ) : (
                 <>
-                  <p className="text-slate-400 text-sm font-medium uppercase tracking-wide">
-                    Método de pago
-                  </p>
+                  <p className="text-[#8b949e] text-sm font-medium uppercase tracking-wide">Método de pago</p>
                   <div className="grid grid-cols-3 gap-2">
-                    {['Efectivo', 'Datafono', 'Nequi'].map(method => (
+                    {["Efectivo", "Datafono", "Nequi"].map(method => (
                       <button
                         key={method}
                         onClick={() => setPaymentMethod(method)}
                         aria-pressed={paymentMethod === method}
-                        className={`py-3 rounded-xl text-sm font-bold transition-all border-2 ${
+                        className={`py-3 rounded-xl text-sm font-bold transition-all border-2 cursor-pointer ${
                           paymentMethod === method
-                            ? 'bg-orange-500 border-orange-500 text-white'
-                            : 'bg-slate-800 border-slate-600 text-slate-300 hover:border-orange-500'
+                            ? "bg-orange-500 border-orange-500 text-white"
+                            : "bg-[#1c2128] border-white/8 text-[#8b949e] hover:border-orange-500"
                         }`}
                       >
                         {method}
@@ -454,67 +439,66 @@ export default function TablesPage() {
                     ))}
                   </div>
 
-                  <div className="bg-slate-800 rounded-xl p-4 space-y-3">
-                    <p className="text-slate-400 text-sm font-medium uppercase tracking-wide">Propina</p>
+                  <div className="bg-[#1c2128] rounded-xl p-4 flex flex-col gap-3">
+                    <p className="text-[#8b949e] text-sm font-medium uppercase tracking-wide">Propina</p>
                     <div className="grid grid-cols-4 gap-2">
                       {[0, 2000, 5000, 10000].map(amount => (
                         <button
                           key={amount}
                           onClick={() => setTipAmount(amount)}
                           aria-pressed={tipAmount === amount}
-                          className={`py-2 rounded-lg text-sm font-bold transition-all border ${
+                          className={`py-2 rounded-lg text-xs font-bold transition-all border cursor-pointer ${
                             tipAmount === amount
-                              ? 'bg-orange-500 border-orange-500 text-white'
-                              : 'bg-slate-700 border-slate-600 text-slate-300 hover:border-orange-400'
+                              ? "bg-orange-500 border-orange-500 text-white"
+                              : "bg-[#161b22] border-white/8 text-[#8b949e] hover:border-orange-400"
                           }`}
                         >
-                          {amount === 0 ? 'Sin propina' : `$${amount.toLocaleString()}`}
+                          {amount === 0 ? "Sin propina" : `$${amount.toLocaleString()}`}
                         </button>
                       ))}
                     </div>
                     <div className="flex items-center gap-2">
-                      <span className="text-slate-400 text-sm">$</span>
+                      <span className="text-[#8b949e] text-sm">$</span>
                       <input
                         type="number"
                         min={0}
-                        value={tipAmount === 0 ? '' : tipAmount}
+                        value={tipAmount === 0 ? "" : tipAmount}
                         onChange={e => setTipAmount(Math.max(0, Number(e.target.value)))}
                         placeholder="Monto personalizado"
                         aria-label="Monto de propina personalizado"
-                        className="w-full bg-slate-700 text-white rounded-lg px-3 py-2 text-sm border border-slate-600 focus:border-orange-500 outline-none placeholder:text-slate-500"
+                        className="w-full bg-[#161b22] text-[#e6edf3] rounded-lg px-3 py-2 text-sm border border-white/8 focus:border-orange-500 outline-none placeholder:text-[#484f58]"
                       />
                     </div>
-                    <div className="space-y-1 pt-1 border-t border-slate-700">
+                    <div className="flex flex-col gap-1 pt-1 border-t border-white/8">
                       <div className="flex justify-between text-sm">
-                        <span className="text-slate-400">Subtotal</span>
-                        <span className="text-white">${subtotal.toLocaleString()}</span>
+                        <span className="text-[#8b949e]">Subtotal</span>
+                        <span className="text-[#e6edf3]">${subtotal.toLocaleString()}</span>
                       </div>
                       <div className="flex justify-between text-sm">
-                        <span className="text-slate-400">Propina</span>
+                        <span className="text-[#8b949e]">Propina</span>
                         <span className="text-green-400">+${tipAmount.toLocaleString()}</span>
                       </div>
                       <div className="flex justify-between font-bold">
-                        <span className="text-white">Total</span>
+                        <span className="text-[#e6edf3]">Total</span>
                         <span className="text-orange-400 text-lg">${totalConPropina.toLocaleString()}</span>
                       </div>
                     </div>
                   </div>
 
-                  <Button
+                  <button
                     onClick={handleCloseOrder}
                     disabled={!paymentMethod}
-                    className="w-full bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white font-bold py-3"
+                    className="w-full flex items-center justify-center gap-2 bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white font-bold py-3 rounded-xl border-none cursor-pointer transition-colors text-sm disabled:cursor-not-allowed"
                   >
-                    <CheckCircle className="h-5 w-5 mr-2" />
+                    <CheckCircle size={20} />
                     Confirmar · ${totalConPropina.toLocaleString()}
-                  </Button>
-                  <Button
-                    variant="outline"
+                  </button>
+                  <button
                     onClick={() => setShowPayment(false)}
-                    className="w-full border-slate-600 text-slate-300 hover:bg-slate-800"
+                    className="w-full bg-transparent border border-white/8 text-[#8b949e] hover:bg-white/5 font-semibold py-3 rounded-xl cursor-pointer transition-colors text-sm"
                   >
                     Volver
-                  </Button>
+                  </button>
                 </>
               )}
             </div>
@@ -522,45 +506,22 @@ export default function TablesPage() {
         </div>
       )}
 
-      {/* ── Modal de confirmación genérico ─────────────────────── */}
+      {/* Modal de confirmación */}
       {confirmModal && (
-        <div style={{
-          position: "fixed", inset: 0, zIndex: 100,
-          background: "rgba(0,0,0,0.6)",
-          display: "flex", alignItems: "center", justifyContent: "center",
-          padding: 20,
-        }}>
-          <div className="scale-in" style={{
-            background: "#161b22",
-            border: "1px solid rgba(255,255,255,0.08)",
-            borderRadius: 14, width: "100%", maxWidth: 400, padding: 24,
-          }}>
-            <h3 style={{ fontWeight: 700, fontSize: 16, color: "#e6edf3", marginBottom: 10 }}>
-              {confirmModal.title}
-            </h3>
-            <p style={{ color: "#8b949e", fontSize: 14, lineHeight: 1.6, marginBottom: 20 }}>
-              {confirmModal.message}
-            </p>
-            <div style={{ display: "flex", gap: 10 }}>
+        <div className="fixed inset-0 z-[100] bg-black/60 flex items-center justify-center p-5">
+          <div className="scale-in bg-[#161b22] border border-white/8 rounded-[14px] w-full max-w-[400px] p-6">
+            <h3 className="font-bold text-[16px] text-[#e6edf3] mb-2.5">{confirmModal.title}</h3>
+            <p className="text-[#8b949e] text-sm leading-relaxed mb-5">{confirmModal.message}</p>
+            <div className="flex gap-2.5">
               <button
                 onClick={() => setConfirmModal(null)}
-                style={{
-                  flex: 1, padding: "10px", borderRadius: 9,
-                  background: "transparent",
-                  border: "1px solid rgba(255,255,255,0.08)",
-                  color: "#8b949e", fontWeight: 600, fontSize: 14, cursor: "pointer",
-                }}
+                className="flex-1 py-2.5 rounded-[9px] bg-transparent border border-white/8 text-[#8b949e] font-semibold text-sm cursor-pointer hover:bg-white/5 transition-colors"
               >
                 Cancelar
               </button>
               <button
                 onClick={confirmModal.onConfirm}
-                style={{
-                  flex: 1, padding: "10px", borderRadius: 9,
-                  background: "rgba(248,113,113,0.15)",
-                  border: "1px solid rgba(248,113,113,0.25)",
-                  color: "#f87171", fontWeight: 700, fontSize: 14, cursor: "pointer",
-                }}
+                className="flex-1 py-2.5 rounded-[9px] bg-red-400/15 border border-red-400/25 text-[#f87171] font-bold text-sm cursor-pointer hover:bg-red-400/25 transition-colors"
               >
                 Confirmar
               </button>

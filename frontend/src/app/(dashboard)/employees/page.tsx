@@ -88,31 +88,26 @@ export default function EmployeesPage() {
     }
   }
 
-  const admins    = employees.filter(e => e.role === "ADMIN")
-  const empList   = employees.filter(e => e.role === "EMPLOYEE")
+  const admins  = employees.filter(e => e.role === "ADMIN")
+  const empList = employees.filter(e => e.role === "EMPLOYEE")
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100vh", overflow: "hidden" }}>
+    <div className="flex flex-col h-screen overflow-hidden">
       <TopBar title="Empleados" />
 
-      <div style={{ flex: 1, overflowY: "auto", padding: "24px 28px", display: "flex", flexDirection: "column", gap: 22 }}>
+      <div className="flex-1 overflow-y-auto px-7 py-6 flex flex-col gap-5">
 
         {/* Header */}
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
+        <div className="flex items-center justify-between flex-wrap gap-3">
           <div>
-            <h2 style={{ fontSize: 21, fontWeight: 800, color: "#e6edf3" }}>Gestión de empleados</h2>
-            <p style={{ fontSize: 14, color: "#8b949e", marginTop: 4 }}>
+            <h2 className="text-[21px] font-extrabold text-[#e6edf3]">Gestión de empleados</h2>
+            <p className="text-sm text-[#8b949e] mt-1">
               {employees.length} usuario{employees.length !== 1 ? "s" : ""} en el restaurante
             </p>
           </div>
           <button
             onClick={() => { setShowForm(true); setFormError(""); setFormState("idle") }}
-            style={{
-              display: "flex", alignItems: "center", gap: 8,
-              padding: "10px 18px", borderRadius: 9,
-              background: "#f97316", border: "none",
-              color: "#fff", fontWeight: 700, fontSize: 14, cursor: "pointer",
-            }}
+            className="flex items-center gap-2 px-[18px] py-[10px] rounded-[9px] bg-orange-500 text-white font-bold text-sm cursor-pointer hover:bg-orange-600 transition-colors"
           >
             <Plus size={16} />
             Agregar empleado
@@ -120,24 +115,20 @@ export default function EmployeesPage() {
         </div>
 
         {/* Stats */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 14 }}>
+        <div className="grid gap-[14px]" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))" }}>
           {[
-            { label: "Administradores", value: admins.length, icon: Shield, color: "#f97316", bg: "rgba(249,115,22,0.13)" },
-            { label: "Empleados", value: empList.length, icon: UserCheck, color: "#60a5fa", bg: "rgba(96,165,250,0.13)" },
+            { label: "Administradores", value: admins.length,  icon: Shield,    color: "text-orange-400", bg: "bg-orange-500/10" },
+            { label: "Empleados",       value: empList.length, icon: UserCheck, color: "text-blue-400",   bg: "bg-blue-500/10"   },
           ].map(s => {
             const Icon = s.icon
             return (
-              <div key={s.label} style={{
-                background: "#1c2128", border: "1px solid rgba(255,255,255,0.08)",
-                borderRadius: 12, padding: "16px 18px",
-                display: "flex", alignItems: "center", gap: 14,
-              }}>
-                <div style={{ background: s.bg, borderRadius: 10, padding: 10 }}>
-                  <Icon size={20} color={s.color} />
+              <div key={s.label} className="bg-[#1c2128] border border-white/[0.08] rounded-xl px-[18px] py-4 flex items-center gap-[14px]">
+                <div className={`${s.bg} rounded-[10px] p-[10px]`}>
+                  <Icon size={20} className={s.color} />
                 </div>
                 <div>
-                  <div style={{ fontSize: 22, fontWeight: 800, color: "#e6edf3" }}>{s.value}</div>
-                  <div style={{ fontSize: 12, color: "#8b949e" }}>{s.label}</div>
+                  <div className="text-[22px] font-extrabold text-[#e6edf3]">{s.value}</div>
+                  <div className="text-xs text-[#8b949e]">{s.label}</div>
                 </div>
               </div>
             )
@@ -145,87 +136,72 @@ export default function EmployeesPage() {
         </div>
 
         {/* Tabla */}
-        <div style={{ background: "#1c2128", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 12, overflow: "hidden" }}>
-          <div style={{ padding: "14px 20px", borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
-            <div style={{ fontWeight: 700, fontSize: 15, color: "#e6edf3", display: "flex", alignItems: "center", gap: 8 }}>
-              <Users size={16} color="#8b949e" />
+        <div className="bg-[#1c2128] border border-white/[0.08] rounded-xl overflow-hidden">
+          <div className="px-5 py-[14px] border-b border-white/[0.08]">
+            <div className="font-bold text-[15px] text-[#e6edf3] flex items-center gap-2">
+              <Users size={16} className="text-[#8b949e]" />
               Usuarios del restaurante
             </div>
           </div>
 
           {loading ? (
-            <div style={{ padding: 40, textAlign: "center" }}>
-              <Loader2 size={28} color="#f97316" className="animate-spin" style={{ margin: "0 auto" }} />
+            <div className="p-10 flex justify-center">
+              <Loader2 size={28} className="animate-spin text-orange-500" />
             </div>
           ) : employees.length === 0 ? (
-            <div style={{ padding: 40, textAlign: "center", color: "#484f58", fontSize: 14 }}>
+            <div className="p-10 text-center text-[#484f58] text-sm">
               No hay usuarios registrados
             </div>
           ) : (
-            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <table className="w-full border-collapse">
               <thead>
-                <tr style={{ borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
+                <tr className="border-b border-white/[0.08]">
                   {["Nombre", "Email", "Rol", "Desde", ""].map(h => (
-                    <th key={h} style={{
-                      textAlign: "left", padding: "10px 20px",
-                      fontSize: 11, fontWeight: 700, color: "#484f58",
-                      textTransform: "uppercase", letterSpacing: 0.6,
-                    }}>{h}</th>
+                    <th key={h} className="text-left px-5 py-[10px] text-[11px] font-bold text-[#484f58] uppercase tracking-[0.6px]">
+                      {h}
+                    </th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {employees.map((emp, i) => (
-                  <tr key={emp.id} style={{
-                    borderBottom: i < employees.length - 1 ? "1px solid rgba(255,255,255,0.05)" : "none",
-                    transition: "background 0.1s",
-                  }}
-                    onMouseEnter={e => (e.currentTarget.style.background = "rgba(255,255,255,0.02)")}
-                    onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
+                  <tr
+                    key={emp.id}
+                    className="hover:bg-white/[0.02] transition-colors"
+                    style={{ borderBottom: i < employees.length - 1 ? "1px solid rgba(255,255,255,0.05)" : "none" }}
                   >
-                    <td style={{ padding: "13px 20px" }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                        <div style={{
-                          width: 32, height: 32, borderRadius: "50%",
-                          background: emp.role === "ADMIN" ? "rgba(249,115,22,0.2)" : "rgba(96,165,250,0.2)",
-                          border: `1px solid ${emp.role === "ADMIN" ? "rgba(249,115,22,0.4)" : "rgba(96,165,250,0.4)"}`,
-                          display: "flex", alignItems: "center", justifyContent: "center",
-                          fontSize: 13, fontWeight: 700,
-                          color: emp.role === "ADMIN" ? "#f97316" : "#60a5fa", flexShrink: 0,
-                        }}>
+                    <td className="px-5 py-[13px]">
+                      <div className="flex items-center gap-[10px]">
+                        <div className={`w-8 h-8 rounded-full flex items-center justify-center text-[13px] font-bold shrink-0
+                          ${emp.role === "ADMIN"
+                            ? "bg-orange-500/20 border border-orange-500/40 text-orange-400"
+                            : "bg-blue-500/20 border border-blue-500/40 text-blue-400"
+                          }`}>
                           {emp.name.charAt(0).toUpperCase()}
                         </div>
-                        <span style={{ fontWeight: 600, color: "#e6edf3", fontSize: 14 }}>{emp.name}</span>
+                        <span className="font-semibold text-[#e6edf3] text-sm">{emp.name}</span>
                       </div>
                     </td>
-                    <td style={{ padding: "13px 20px", color: "#8b949e", fontSize: 13 }}>{emp.email}</td>
-                    <td style={{ padding: "13px 20px" }}>
-                      <span style={{
-                        padding: "3px 10px", borderRadius: 99, fontSize: 11, fontWeight: 700,
-                        background: emp.role === "ADMIN" ? "rgba(249,115,22,0.13)" : "rgba(96,165,250,0.13)",
-                        color: emp.role === "ADMIN" ? "#f97316" : "#60a5fa",
-                      }}>
+                    <td className="px-5 py-[13px] text-[#8b949e] text-[13px]">{emp.email}</td>
+                    <td className="px-5 py-[13px]">
+                      <span className={`px-[10px] py-[3px] rounded-full text-[11px] font-bold
+                        ${emp.role === "ADMIN"
+                          ? "bg-orange-500/[0.13] text-orange-400"
+                          : "bg-blue-500/[0.13] text-blue-400"
+                        }`}>
                         {emp.role === "ADMIN" ? "Admin" : "Empleado"}
                       </span>
                     </td>
-                    <td style={{ padding: "13px 20px", color: "#8b949e", fontSize: 13 }}>
+                    <td className="px-5 py-[13px] text-[#8b949e] text-[13px]">
                       {new Date(emp.createdAt).toLocaleDateString("es-CO", { day: "2-digit", month: "2-digit", year: "numeric" })}
                     </td>
-                    <td style={{ padding: "13px 20px" }}>
+                    <td className="px-5 py-[13px]">
                       {emp.role !== "ADMIN" && (
                         <button
                           onClick={() => handleDeleteRequest(emp)}
                           aria-label={`Eliminar empleado ${emp.name}`}
                           disabled={deletingId === emp.id}
-                          style={{
-                            display: "flex", alignItems: "center", gap: 6,
-                            padding: "6px 12px", borderRadius: 7,
-                            background: "rgba(248,113,113,0.1)",
-                            border: "1px solid rgba(248,113,113,0.2)",
-                            color: "#f87171", fontSize: 12, fontWeight: 600,
-                            cursor: deletingId === emp.id ? "wait" : "pointer",
-                            opacity: deletingId === emp.id ? 0.5 : 1,
-                          }}
+                          className="flex items-center gap-[6px] px-3 py-[6px] rounded-[7px] bg-red-400/10 border border-red-400/20 text-red-400 text-xs font-semibold hover:bg-red-400/20 transition-colors disabled:opacity-50 disabled:cursor-wait"
                         >
                           {deletingId === emp.id
                             ? <Loader2 size={13} className="animate-spin" />
@@ -245,33 +221,23 @@ export default function EmployeesPage() {
 
       {/* Modal crear empleado */}
       {showForm && (
-        <div style={{
-          position: "fixed", inset: 0, zIndex: 100,
-          background: "rgba(0,0,0,0.6)",
-          display: "flex", alignItems: "center", justifyContent: "center", padding: 20,
-        }}>
-          <div style={{
-            background: "#161b22", border: "1px solid rgba(255,255,255,0.08)",
-            borderRadius: 16, width: "100%", maxWidth: 420, overflow: "hidden",
-          }}>
-            <div style={{
-              padding: "18px 20px", borderBottom: "1px solid rgba(255,255,255,0.08)",
-              display: "flex", alignItems: "center", justifyContent: "space-between",
-            }}>
-              <div style={{ fontWeight: 700, fontSize: 16, color: "#e6edf3" }}>Nuevo empleado</div>
-              <button onClick={() => setShowForm(false)} style={{ color: "#8b949e", cursor: "pointer", border: "none", background: "none" }}>
+        <div className="fixed inset-0 z-[100] bg-black/60 flex items-center justify-center p-5">
+          <div className="bg-[#161b22] border border-white/[0.08] rounded-2xl w-full max-w-[420px] overflow-hidden">
+            <div className="px-5 py-[18px] border-b border-white/[0.08] flex items-center justify-between">
+              <div className="font-bold text-base text-[#e6edf3]">Nuevo empleado</div>
+              <button onClick={() => setShowForm(false)} className="text-[#8b949e] hover:text-[#e6edf3] transition-colors cursor-pointer">
                 <X size={20} />
               </button>
             </div>
 
-            <form onSubmit={handleCreate} style={{ padding: 24, display: "flex", flexDirection: "column", gap: 16 }}>
+            <form onSubmit={handleCreate} className="p-6 flex flex-col gap-4">
               {[
-                { label: "Nombre completo", value: name, set: setName, type: "text", placeholder: "Juan García" },
-                { label: "Email", value: email, set: setEmail, type: "email", placeholder: "juan@restaurante.com" },
-                { label: "Contraseña", value: password, set: setPassword, type: "password", placeholder: "Mínimo 6 caracteres" },
+                { label: "Nombre completo", value: name,     set: setName,     type: "text",     placeholder: "Juan García" },
+                { label: "Email",           value: email,    set: setEmail,    type: "email",    placeholder: "juan@restaurante.com" },
+                { label: "Contraseña",      value: password, set: setPassword, type: "password", placeholder: "Mínimo 6 caracteres" },
               ].map(f => (
                 <div key={f.label}>
-                  <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "#8b949e", marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.5 }}>
+                  <label className="block text-xs font-semibold text-[#8b949e] mb-[6px] uppercase tracking-[0.5px]">
                     {f.label}
                   </label>
                   <input
@@ -280,37 +246,30 @@ export default function EmployeesPage() {
                     onChange={e => f.set(e.target.value)}
                     placeholder={f.placeholder}
                     required
-                    style={{
-                      width: "100%", padding: "10px 12px", borderRadius: 8,
-                      background: "#0d1117", border: "1px solid rgba(255,255,255,0.08)",
-                      color: "#e6edf3", fontSize: 14, outline: "none",
-                      boxSizing: "border-box",
-                    }}
+                    className="w-full px-3 py-[10px] rounded-lg bg-[#0d1117] border border-white/[0.08] text-[#e6edf3] text-sm outline-none focus:ring-2 focus:ring-orange-500 placeholder:text-[#484f58]"
                   />
                 </div>
               ))}
 
               {formError && (
-                <div style={{ background: "rgba(248,113,113,0.1)", border: "1px solid rgba(248,113,113,0.2)", borderRadius: 8, padding: "10px 12px", color: "#f87171", fontSize: 13 }}>
+                <div className="bg-red-400/10 border border-red-400/20 rounded-lg px-3 py-[10px] text-red-400 text-[13px]">
                   {formError}
                 </div>
               )}
 
-              <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
-                <button type="button" onClick={() => setShowForm(false)} style={{
-                  flex: 1, padding: "11px", borderRadius: 9,
-                  background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)",
-                  color: "#8b949e", fontWeight: 600, fontSize: 14, cursor: "pointer",
-                }}>
+              <div className="flex gap-[10px] mt-1">
+                <button
+                  type="button"
+                  onClick={() => setShowForm(false)}
+                  className="flex-1 py-[11px] rounded-[9px] bg-white/5 border border-white/[0.08] text-[#8b949e] font-semibold text-sm cursor-pointer hover:bg-white/10 transition-colors"
+                >
                   Cancelar
                 </button>
-                <button type="submit" disabled={formState === "loading"} style={{
-                  flex: 1, padding: "11px", borderRadius: 9,
-                  background: formState === "loading" ? "rgba(249,115,22,0.5)" : "#f97316",
-                  border: "none", color: "#fff", fontWeight: 700, fontSize: 14,
-                  cursor: formState === "loading" ? "wait" : "pointer",
-                  display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
-                }}>
+                <button
+                  type="submit"
+                  disabled={formState === "loading"}
+                  className="flex-1 py-[11px] rounded-[9px] bg-orange-500 disabled:opacity-50 disabled:cursor-wait text-white font-bold text-sm flex items-center justify-center gap-2 hover:bg-orange-600 transition-colors"
+                >
                   {formState === "loading" && <Loader2 size={15} className="animate-spin" />}
                   {formState === "loading" ? "Creando..." : "Crear empleado"}
                 </button>
@@ -320,51 +279,30 @@ export default function EmployeesPage() {
         </div>
       )}
 
-      {/* ── Modal confirmación eliminar empleado ────────────── */}
+      {/* Modal confirmación eliminar empleado */}
       {confirmModal && (
-        <div style={{
-          position: "fixed", inset: 0, zIndex: 100,
-          background: "rgba(0,0,0,0.6)",
-          display: "flex", alignItems: "center", justifyContent: "center",
-          padding: 20,
-        }}>
-          <div style={{
-            background: "#161b22",
-            border: "1px solid rgba(255,255,255,0.08)",
-            borderRadius: 14, width: "100%", maxWidth: 380, padding: 24,
-            textAlign: "center",
-          }}>
-            <div style={{
-              width: 44, height: 44, borderRadius: "50%",
-              background: "rgba(248,113,113,0.13)",
-              display: "flex", alignItems: "center", justifyContent: "center",
-              margin: "0 auto 14px",
-            }}>
-              <Trash2 size={20} color="#f87171" />
+        <div className="fixed inset-0 z-[100] bg-black/60 flex items-center justify-center p-5">
+          <div className="bg-[#161b22] border border-white/[0.08] rounded-[14px] w-full max-w-[380px] p-6 text-center">
+            <div className="w-11 h-11 rounded-full bg-red-400/[0.13] flex items-center justify-center mx-auto mb-[14px]">
+              <Trash2 size={20} className="text-red-400" />
             </div>
-            <div style={{ fontWeight: 700, fontSize: 16, color: "#e6edf3", marginBottom: 8 }}>
-              ¿Eliminar empleado?
-            </div>
-            <p style={{ color: "#8b949e", fontSize: 14, marginBottom: 20 }}>
+            <div className="font-bold text-base text-[#e6edf3] mb-2">¿Eliminar empleado?</div>
+            <p className="text-[#8b949e] text-sm mb-5">
               Vas a eliminar a{" "}
-              <span style={{ color: "#e6edf3", fontWeight: 600 }}>"{confirmModal.employeeName}"</span>.
+              <span className="text-[#e6edf3] font-semibold">"{confirmModal.employeeName}"</span>.
               Esta acción no se puede deshacer.
             </p>
-            <div style={{ display: "flex", gap: 10 }}>
-              <button onClick={() => setConfirmModal(null)} style={{
-                flex: 1, padding: "10px", borderRadius: 9,
-                background: "transparent",
-                border: "1px solid rgba(255,255,255,0.08)",
-                color: "#8b949e", fontWeight: 600, fontSize: 14, cursor: "pointer",
-              }}>
+            <div className="flex gap-[10px]">
+              <button
+                onClick={() => setConfirmModal(null)}
+                className="flex-1 py-[10px] rounded-[9px] bg-transparent border border-white/[0.08] text-[#8b949e] font-semibold text-sm cursor-pointer hover:bg-white/5 transition-colors"
+              >
                 Cancelar
               </button>
-              <button onClick={handleDeleteConfirmed} style={{
-                flex: 1, padding: "10px", borderRadius: 9,
-                background: "rgba(248,113,113,0.15)",
-                border: "1px solid rgba(248,113,113,0.25)",
-                color: "#f87171", fontWeight: 700, fontSize: 14, cursor: "pointer",
-              }}>
+              <button
+                onClick={handleDeleteConfirmed}
+                className="flex-1 py-[10px] rounded-[9px] bg-red-400/[0.15] border border-red-400/25 text-red-400 font-bold text-sm cursor-pointer hover:bg-red-400/25 transition-colors"
+              >
                 Sí, eliminar
               </button>
             </div>

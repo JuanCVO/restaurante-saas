@@ -170,24 +170,24 @@ export default function ComprasPage() {
     <div className="p-8 space-y-8 h-full overflow-y-auto">
 
       <div>
-        <h1 className="text-3xl font-bold text-white">Compras y Gastos</h1>
-        <p className="text-slate-400 mt-1">Registro de movimientos del día</p>
+        <h1 className="text-3xl font-bold text-[#e6edf3]">Compras y Gastos</h1>
+        <p className="text-[#8b949e] mt-1">Registro de movimientos del día</p>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
         {statCards.map(stat => {
           const Icon = stat.icon
           return (
-            <Card key={stat.title} className="bg-slate-800 border-slate-700">
+            <Card key={stat.title} className="bg-[#1c2128] border-[#30363d]">
               <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-slate-400 text-sm font-medium">{stat.title}</CardTitle>
+                <CardTitle className="text-[#8b949e] text-sm font-medium">{stat.title}</CardTitle>
                 <div className={`${stat.bg} p-2 rounded-lg`}>
                   <Icon className={`h-5 w-5 ${stat.color}`} />
                 </div>
               </CardHeader>
               <CardContent>
-                <p className="text-2xl font-bold text-white">{stat.value}</p>
-                <p className="text-slate-400 text-xs mt-1">solo movimientos de hoy</p>
+                <p className="text-2xl font-bold text-[#e6edf3]">{stat.value}</p>
+                <p className="text-[#8b949e] text-xs mt-1">solo movimientos de hoy</p>
               </CardContent>
             </Card>
           )
@@ -195,9 +195,9 @@ export default function ComprasPage() {
       </div>
 
       {/* Movimientos de caja */}
-      <Card className="bg-slate-800 border-slate-700">
+      <Card className="bg-[#1c2128] border-[#30363d]">
         <CardHeader>
-          <CardTitle className="text-white">Registrar movimiento</CardTitle>
+          <CardTitle className="text-[#e6edf3]">Registrar movimiento</CardTitle>
         </CardHeader>
         <CardContent className="space-y-6">
 
@@ -228,8 +228,8 @@ export default function ComprasPage() {
             >
               <Wallet className="h-5 w-5 text-green-400 shrink-0" />
               <div className="flex-1">
-                <p className="text-white font-medium text-sm mb-1">Base de caja</p>
-                <p className="text-slate-400 text-xs">Dinero inicial en caja para dar vueltas</p>
+                <p className="text-[#e6edf3] font-medium text-sm mb-1">Base de caja</p>
+                <p className="text-[#8b949e] text-xs">Dinero inicial en caja para dar vueltas</p>
               </div>
               <input
                 type="number"
@@ -238,7 +238,7 @@ export default function ComprasPage() {
                 placeholder="Monto ($)"
                 min={1}
                 required
-                className="bg-slate-700 border border-slate-600 text-white rounded-lg px-3 py-2 text-sm w-40 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-green-500"
+                className="bg-[#161b22] border border-[#30363d] text-[#e6edf3] rounded-lg px-3 py-2 text-sm w-40 placeholder:text-[#8b949e] focus:outline-none focus:ring-2 focus:ring-green-500"
               />
               <button
                 type="submit"
@@ -253,7 +253,7 @@ export default function ComprasPage() {
               <Wallet className="h-5 w-5 text-green-400" />
               <div>
                 <p className="text-green-400 font-medium text-sm">Base de caja ya registrada hoy</p>
-                <p className="text-slate-400 text-xs">${baseCaja.toLocaleString()} — no se puede modificar</p>
+                <p className="text-[#8b949e] text-xs">${baseCaja.toLocaleString()} — no se puede modificar</p>
               </div>
             </div>
           )}
@@ -261,11 +261,11 @@ export default function ComprasPage() {
           <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
 
             <div className="flex flex-col gap-1">
-              <label className="text-slate-400 text-sm">Tipo</label>
+              <label className="text-[#8b949e] text-sm">Tipo</label>
               <select
                 value={type === "BASE_CAJA" ? "COMPRA" : type}
                 onChange={e => setType(e.target.value as MovementType)}
-                className="bg-slate-700 border border-slate-600 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+                className="bg-[#161b22] border border-[#30363d] text-[#e6edf3] rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
               >
                 <option value="COMPRA">Compra (ingredientes)</option>
                 <option value="GASTO">Gasto (se resta del ingreso)</option>
@@ -273,36 +273,36 @@ export default function ComprasPage() {
             </div>
 
             <div className="flex flex-col gap-1">
-              <label className="text-slate-400 text-sm">Concepto</label>
+              <label className="text-[#8b949e] text-sm">Concepto</label>
               <input
                 type="text"
                 value={concept}
                 onChange={e => setConcept(e.target.value)}
                 placeholder="Ej: Compra de arroz, Domicilio..."
-                className="bg-slate-700 border border-slate-600 text-white rounded-lg px-3 py-2 text-sm placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-orange-500"
+                className="bg-[#161b22] border border-[#30363d] text-[#e6edf3] rounded-lg px-3 py-2 text-sm placeholder:text-[#8b949e] focus:outline-none focus:ring-2 focus:ring-orange-500"
                 required
               />
             </div>
 
             <div className="flex flex-col gap-1">
-              <label className="text-slate-400 text-sm">Monto ($)</label>
+              <label className="text-[#8b949e] text-sm">Monto ($)</label>
               <input
                 type="number"
                 value={amount}
                 onChange={e => setAmount(e.target.value)}
                 placeholder="0"
                 min={1}
-                className="bg-slate-700 border border-slate-600 text-white rounded-lg px-3 py-2 text-sm placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-orange-500"
+                className="bg-[#161b22] border border-[#30363d] text-[#e6edf3] rounded-lg px-3 py-2 text-sm placeholder:text-[#8b949e] focus:outline-none focus:ring-2 focus:ring-orange-500"
                 required
               />
             </div>
 
             <div className="flex flex-col gap-1">
-              <label className="text-slate-400 text-sm">Método de pago</label>
+              <label className="text-[#8b949e] text-sm">Método de pago</label>
               <select
                 value={paymentMethod}
                 onChange={e => setPaymentMethod(e.target.value)}
-                className="bg-slate-700 border border-slate-600 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+                className="bg-[#161b22] border border-[#30363d] text-[#e6edf3] rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
               >
                 <option value="Efectivo">Efectivo</option>
                 <option value="Nequi">Nequi</option>
@@ -311,13 +311,13 @@ export default function ComprasPage() {
             </div>
 
             <div className="flex flex-col gap-1">
-              <label className="text-slate-400 text-sm">Notas (opcional)</label>
+              <label className="text-[#8b949e] text-sm">Notas (opcional)</label>
               <input
                 type="text"
                 value={notes}
                 onChange={e => setNotes(e.target.value)}
                 placeholder="Observación adicional..."
-                className="bg-slate-700 border border-slate-600 text-white rounded-lg px-3 py-2 text-sm placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-orange-500"
+                className="bg-[#161b22] border border-[#30363d] text-[#e6edf3] rounded-lg px-3 py-2 text-sm placeholder:text-[#8b949e] focus:outline-none focus:ring-2 focus:ring-orange-500"
               />
             </div>
 
@@ -336,21 +336,21 @@ export default function ComprasPage() {
       </Card>
 
       {/* Pagos a empleados */}
-      <Card className="bg-slate-800 border-slate-700">
+      <Card className="bg-[#1c2128] border-[#30363d]">
         <CardHeader>
-          <CardTitle className="text-white">Pagos a empleados</CardTitle>
+          <CardTitle className="text-[#e6edf3]">Pagos a empleados</CardTitle>
         </CardHeader>
         <CardContent className="space-y-6">
 
           <form onSubmit={handlePagoSubmit} className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
 
             <div className="flex flex-col gap-1">
-              <label className="text-slate-400 text-sm">Empleado</label>
+              <label className="text-[#8b949e] text-sm">Empleado</label>
               <select
                 value={selectedEmployee}
                 onChange={e => setSelectedEmployee(e.target.value)}
                 required
-                className="bg-slate-700 border border-slate-600 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+                className="bg-[#161b22] border border-[#30363d] text-[#e6edf3] rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
               >
                 <option value="">Seleccionar empleado...</option>
                 {employees.map(emp => (
@@ -362,7 +362,7 @@ export default function ComprasPage() {
             </div>
 
             <div className="flex flex-col gap-1">
-              <label className="text-slate-400 text-sm">Pago del día ($)</label>
+              <label className="text-[#8b949e] text-sm">Pago del día ($)</label>
               <input
                 type="number"
                 value={salary}
@@ -370,30 +370,30 @@ export default function ComprasPage() {
                 placeholder="0"
                 min={0}
                 required
-                className="bg-slate-700 border border-slate-600 text-white rounded-lg px-3 py-2 text-sm placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                className="bg-[#161b22] border border-[#30363d] text-[#e6edf3] rounded-lg px-3 py-2 text-sm placeholder:text-[#8b949e] focus:outline-none focus:ring-2 focus:ring-purple-500"
               />
             </div>
 
             <div className="flex flex-col gap-1">
-              <label className="text-slate-400 text-sm">Propina asignada ($)</label>
+              <label className="text-[#8b949e] text-sm">Propina asignada ($)</label>
               <input
                 type="number"
                 value={tipPago}
                 onChange={e => setTipPago(e.target.value)}
                 placeholder="0"
                 min={0}
-                className="bg-slate-700 border border-slate-600 text-white rounded-lg px-3 py-2 text-sm placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                className="bg-[#161b22] border border-[#30363d] text-[#e6edf3] rounded-lg px-3 py-2 text-sm placeholder:text-[#8b949e] focus:outline-none focus:ring-2 focus:ring-purple-500"
               />
             </div>
 
             <div className="flex flex-col gap-1 md:col-span-2">
-              <label className="text-slate-400 text-sm">Notas (opcional)</label>
+              <label className="text-[#8b949e] text-sm">Notas (opcional)</label>
               <input
                 type="text"
                 value={notesPago}
                 onChange={e => setNotesPago(e.target.value)}
                 placeholder="Observación..."
-                className="bg-slate-700 border border-slate-600 text-white rounded-lg px-3 py-2 text-sm placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                className="bg-[#161b22] border border-[#30363d] text-[#e6edf3] rounded-lg px-3 py-2 text-sm placeholder:text-[#8b949e] focus:outline-none focus:ring-2 focus:ring-purple-500"
               />
             </div>
 
@@ -411,13 +411,13 @@ export default function ComprasPage() {
 
           {payments.length > 0 ? (
             <div>
-              <p className="text-slate-400 text-sm mb-3">Pagos registrados hoy</p>
+              <p className="text-[#8b949e] text-sm mb-3">Pagos registrados hoy</p>
               <div className="space-y-2">
                 {payments.map(p => (
-                  <div key={p.id} className="flex items-center justify-between bg-slate-700/40 rounded-lg px-4 py-3">
+                  <div key={p.id} className="flex items-center justify-between bg-[#30363d]/40 rounded-lg px-4 py-3">
                     <div>
-                      <p className="text-white text-sm font-medium">{p.user.name}</p>
-                      <p className="text-slate-400 text-xs mt-0.5">
+                      <p className="text-[#e6edf3] text-sm font-medium">{p.user.name}</p>
+                      <p className="text-[#8b949e] text-xs mt-0.5">
                         Pago: ${p.salary.toLocaleString()}
                         {p.tip > 0 && `  +  Propina: $${p.tip.toLocaleString()}`}
                         {p.notes && `  ·  ${p.notes}`}
@@ -429,21 +429,21 @@ export default function ComprasPage() {
                       </span>
                       <button
                         onClick={() => handleDeletePago(p.id)}
-                        className="text-slate-500 hover:text-red-400 transition-colors"
+                        className="text-[#8b949e] hover:text-red-400 transition-colors"
                       >
                         <Trash2 className="h-4 w-4" />
                       </button>
                     </div>
                   </div>
                 ))}
-                <div className="flex justify-between px-4 pt-2 border-t border-slate-700">
-                  <span className="text-slate-400 text-sm">Total pagos hoy</span>
+                <div className="flex justify-between px-4 pt-2 border-t border-[#30363d]">
+                  <span className="text-[#8b949e] text-sm">Total pagos hoy</span>
                   <span className="text-purple-400 font-bold">${totalPagosHoy.toLocaleString()}</span>
                 </div>
               </div>
             </div>
           ) : (
-            <p className="text-slate-500 text-sm text-center py-4">No hay pagos a empleados registrados hoy</p>
+            <p className="text-[#8b949e] text-sm text-center py-4">No hay pagos a empleados registrados hoy</p>
           )}
 
         </CardContent>
@@ -451,40 +451,40 @@ export default function ComprasPage() {
 
       {/* Historial de movimientos */}
       <div>
-        <h2 className="text-white font-bold text-xl mb-4">Historial de movimientos</h2>
-        <Card className="bg-slate-800 border-slate-700">
+        <h2 className="text-[#e6edf3] font-bold text-xl mb-4">Historial de movimientos</h2>
+        <Card className="bg-[#1c2128] border-[#30363d]">
           <CardContent className="p-0">
             <table className="w-full">
               <thead>
-                <tr className="border-b border-slate-700">
-                  <th className="text-left text-slate-400 font-medium p-4">Tipo</th>
-                  <th className="text-left text-slate-400 font-medium p-4">Concepto</th>
-                  <th className="text-left text-slate-400 font-medium p-4">Pago</th>
-                  <th className="text-left text-slate-400 font-medium p-4">Notas</th>
-                  <th className="text-left text-slate-400 font-medium p-4">Hora</th>
-                  <th className="text-left text-slate-400 font-medium p-4">Monto</th>
-                  <th className="text-left text-slate-400 font-medium p-4"></th>
+                <tr className="border-b border-[#30363d]">
+                  <th className="text-left text-[#8b949e] font-medium p-4">Tipo</th>
+                  <th className="text-left text-[#8b949e] font-medium p-4">Concepto</th>
+                  <th className="text-left text-[#8b949e] font-medium p-4">Pago</th>
+                  <th className="text-left text-[#8b949e] font-medium p-4">Notas</th>
+                  <th className="text-left text-[#8b949e] font-medium p-4">Hora</th>
+                  <th className="text-left text-[#8b949e] font-medium p-4">Monto</th>
+                  <th className="text-left text-[#8b949e] font-medium p-4"></th>
                 </tr>
               </thead>
               <tbody>
                 {movements.map(m => (
-                  <tr key={m.id} className="border-b border-slate-700/50 hover:bg-slate-700/30">
+                  <tr key={m.id} className="border-b border-[#30363d]/50 hover:bg-[#30363d]/30">
                     <td className="p-4">
                       <span className={`text-xs font-medium px-2 py-1 rounded-full ${TYPE_COLORS[m.type]}`}>
                         {TYPE_LABELS[m.type]}
                       </span>
                     </td>
-                    <td className="p-4 text-white text-sm">{m.concept}</td>
-                    <td className="p-4 text-slate-300 text-sm">{m.paymentMethod ?? "—"}</td>
-                    <td className="p-4 text-slate-400 text-sm">{m.notes || "—"}</td>
-                    <td className="p-4 text-slate-400 text-sm">
+                    <td className="p-4 text-[#e6edf3] text-sm">{m.concept}</td>
+                    <td className="p-4 text-[#c9d1d9] text-sm">{m.paymentMethod ?? "—"}</td>
+                    <td className="p-4 text-[#8b949e] text-sm">{m.notes || "—"}</td>
+                    <td className="p-4 text-[#8b949e] text-sm">
                       {new Date(m.createdAt).toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit" })}
                     </td>
                     <td className="p-4 text-orange-400 font-bold">${m.amount.toLocaleString()}</td>
                     <td className="p-4">
                       <button
                         onClick={() => handleDelete(m.id)}
-                        className="text-slate-500 hover:text-red-400 transition-colors"
+                        className="text-[#8b949e] hover:text-red-400 transition-colors"
                       >
                         <Trash2 className="h-4 w-4" />
                       </button>
@@ -493,7 +493,7 @@ export default function ComprasPage() {
                 ))}
                 {movements.length === 0 && (
                   <tr>
-                    <td colSpan={7} className="p-8 text-center text-slate-400">
+                    <td colSpan={7} className="p-8 text-center text-[#8b949e]">
                       No hay movimientos registrados todavía
                     </td>
                   </tr>

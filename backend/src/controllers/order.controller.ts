@@ -167,7 +167,6 @@ export const getOrderHistory = asyncHandler(async (req: Request, res: Response) 
   const orders = await prisma.order.findMany({
     where: { restaurantId, status: "CERRADA", createdAt: { gte: today, lt: tomorrow } },
     orderBy: { createdAt: "desc" },
-    take: 20,
     include: { table: true, items: { include: { product: true } } },
   })
   return res.json(orders)
@@ -177,7 +176,6 @@ export const getDashboardStats = asyncHandler(async (req: Request, res: Response
   const restaurantId = req.params.restaurantId as string
 
   const { today, tomorrow } = getColombiaDayRange()
-
   const ordersToday = await prisma.order.findMany({
     where: { restaurantId, status: "CERRADA", createdAt: { gte: today, lt: tomorrow } },
     include: { items: { select: { quantity: true } } },
