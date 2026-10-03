@@ -1,180 +1,156 @@
 "use client"
 
-import { useEffect, useState } from "react"
-import { UtensilsCrossed, Plus, Trash2, X, ShoppingBag, CheckCircle, Minus, Search } from "lucide-react"
+import { useCallback, useEffect, useMemo, useState } from "react"
+import { CheckCircle2, Loader2, Minus, Plus, Printer, Search, Trash2 } from "lucide-react"
+
 import api from "@/lib/axios"
-import { useCurrentUser, authHeaders } from "@/lib/auth"
+import { useCurrentUser } from "@/lib/auth"
+import { apiMessage } from "@/lib/errors"
+import { cop, elapsed, isToday } from "@/lib/format"
+import { cn } from "@/lib/utils"
+import { OPEN_PRINTER_EVENT, PrinterError, usePrinter } from "@/lib/printer"
+import { buildReceipt, type ReceiptData } from "@/lib/receipt"
 import type { Table, Order, OrderItem } from "@/types/api"
+import TopBar from "@/components/ui/layout/TopBar"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Modal } from "@/components/ui/modal"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
+import { useToast } from "@/components/ui/toast"
 
 type Product = {
   id: string
   name: string
   price: number
   unit: string
-  category: { name: string }
+  stock: number
+  minStock: number
+  category: { name: string } | null
 }
 
-type ConfirmModal = {
+type TableFilter = "all" | "busy" | "free"
+type Pane = "products" | "account"
+
+type ConfirmState = {
   title: string
   message: string
-  onConfirm: () => void
+  confirmLabel: string
+  tone: "danger" | "primary"
+  onConfirm: () => Promise<void> | void
 }
 
-export default function TablesPage() {
-  const [tables,        setTables]        = useState<Table[]>([])
-  const [products,      setProducts]      = useState<Product[]>([])
-  const [selectedTable, setSelectedTable] = useState<Table | null>(null)
-  const [activeOrder,   setActiveOrder]   = useState<Order | null>(null)
-  const [drawerOpen,    setDrawerOpen]    = useState(false)
-  const [loading,       setLoading]       = useState(false)
-  const [paymentMethod, setPaymentMethod] = useState("")
-  const [showPayment,   setShowPayment]   = useState(false)
-  const [confirmModal,  setConfirmModal]  = useState<ConfirmModal | null>(null)
-  const [quantities,    setQuantities]    = useState<Record<string, number>>({})
-  const [tipAmount,     setTipAmount]     = useState(0)
-  const [tableSearch,   setTableSearch]   = useState("")
-  const [productSearch, setProductSearch] = useState("")
+const PAYMENT_METHODS = ["Efectivo", "Datafono", "Nequi"] as const
+const TIP_PRESETS = [0, 2000, 5000, 10000]
 
-  const { token, restaurantId } = useCurrentUser()
+export default function TablesPage() {
+  const toast = useToast()
+  const { user, token, restaurantId } = useCurrentUser()
+  const isAdmin = user?.role === "ADMIN"
+  const printer = usePrinter()
+  // los meseros piden desde el celular; la impresora está en la caja
+  const canPrint = user?.role === "ADMIN"
+
+  const [tables, setTables] = useState<Table[] | null>(null)
+  const [products, setProducts] = useState<Product[]>([])
+  const [filter, setFilter] = useState<TableFilter>("all")
+  const [tableSearch, setTableSearch] = useState("")
+  const [now, setNow] = useState(() => Date.now())
+  const [creatingTable, setCreatingTable] = useState(false)
+  const [openingId, setOpeningId] = useState<string | null>(null)
+
+  const [modalOpen, setModalOpen] = useState(false)
+  const [selectedTable, setSelectedTable] = useState<Table | null>(null)
+  const [activeOrder, setActiveOrder] = useState<Order | null>(null)
+  const [pane, setPane] = useState<Pane>("products")
+  const [productSearch, setProductSearch] = useState("")
+  const [categoryFilter, setCategoryFilter] = useState("Todas")
+  const [quantities, setQuantities] = useState<Record<string, number>>({})
+  const [pending, setPending] = useState(0)
+  const [showPayment, setShowPayment] = useState(false)
+  const [paymentMethod, setPaymentMethod] = useState("")
+  const [tipAmount, setTipAmount] = useState(0)
+  const [submitting, setSubmitting] = useState(false)
+
+  const [confirm, setConfirm] = useState<ConfirmState | null>(null)
+  const [confirmBusy, setConfirmBusy] = useState(false)
+
+  const fetchTables = useCallback(async () => {
+    if (!restaurantId) return
+    try {
+      const res = await api.get(`/tables/${restaurantId}`)
+      setTables(res.data)
+    } catch {
+      // si falla el refresco automático, no avisamos
+    }
+  }, [restaurantId])
+
+  const fetchProducts = useCallback(async () => {
+    if (!restaurantId) return
+    try {
+      const res = await api.get(`/products/${restaurantId}`)
+      setProducts(res.data)
+    } catch (err) {
+      toast.error(apiMessage(err, "No se pudieron cargar los productos."))
+    }
+  }, [restaurantId, toast])
 
   useEffect(() => {
     if (!restaurantId || !token) return
     fetchTables()
     fetchProducts()
-  }, [restaurantId, token])
+  }, [restaurantId, token, fetchTables, fetchProducts])
 
-  const fetchTables = async () => {
-    const res = await api.get(`/tables/${restaurantId}`, { headers: authHeaders() })
-    setTables(res.data)
-  }
+  // refresco automático para que varios meseros vean lo mismo
+  useEffect(() => {
+    if (!restaurantId || !token || modalOpen) return
+    const id = window.setInterval(() => {
+      if (document.visibilityState === "visible") {
+        fetchTables()
+        setNow(Date.now())
+      }
+    }, 15_000)
+    return () => window.clearInterval(id)
+  }, [restaurantId, token, modalOpen, fetchTables])
 
-  const fetchProducts = async () => {
-    const res = await api.get(`/products/${restaurantId}`, { headers: authHeaders() })
-    setProducts(res.data)
-  }
-
-  const handleTableClick = async (table: Table) => {
-    setSelectedTable(table)
-    setLoading(true)
-    const existingRes = await api.get(`/orders/table/${table.id}`, { headers: authHeaders() })
-    const existingOrder = existingRes.data
-    if (existingOrder) {
-      setActiveOrder(existingOrder)
-    } else {
-      const res = await api.post("/orders", { tableId: table.id, restaurantId }, { headers: authHeaders() })
-      setActiveOrder(res.data)
-    }
-    setLoading(false)
-    setDrawerOpen(true)
-  }
-
-  const handleAddProduct = async (productId: string, quantity: number) => {
-    if (!activeOrder) return
-
-    const product = products.find(p => p.id === productId)
-    if (!product) return
-
-    const prevOrder = activeOrder
-    const existingItem = activeOrder.items?.find((i: OrderItem) => i.product.id === productId)
-
-    const optimisticItems = existingItem
-      ? activeOrder.items.map((i: OrderItem) =>
-          i.product.id === productId ? { ...i, quantity: i.quantity + quantity } : i
-        )
-      : [
-          ...(activeOrder.items ?? []),
-          {
-            id: `temp-${productId}`,
-            orderId: activeOrder.id,
-            productId,
-            quantity,
-            unitPrice: product.price,
-            product,
-          } as OrderItem,
-        ]
-
-    const optimisticTotal = optimisticItems.reduce(
-      (sum: number, i: OrderItem) => sum + i.unitPrice * i.quantity, 0
-    )
-
-    setActiveOrder({ ...activeOrder, items: optimisticItems, total: optimisticTotal })
-    setQuantities(q => ({ ...q, [productId]: 1 }))
-    setTables(prev => prev.map(t => t.id === selectedTable?.id ? { ...t, status: "OCUPADA" } : t))
-    setSelectedTable(prev => prev ? { ...prev, status: "OCUPADA" } : prev)
-
-    try {
-      const { data: savedItem } = await api.post(
-        `/orders/${activeOrder.id}/items`,
-        { productId, quantity },
-        { headers: authHeaders() }
-      )
-      setActiveOrder(prev => {
-        if (!prev) return prev
-        const items = prev.items.map((i: OrderItem) =>
-          i.id === `temp-${productId}` ? { ...savedItem, product } : i
-        )
-        const total = items.reduce((sum: number, i: OrderItem) => sum + i.unitPrice * i.quantity, 0)
-        return { ...prev, items, total }
-      })
-    } catch (error: any) {
-      setActiveOrder(prevOrder)
-      alert(error?.response?.data?.message || "Error al agregar producto")
-    }
-  }
-
-  const handleCloseOrder = async () => {
-    if (!activeOrder) return
-    await api.patch(`/orders/${activeOrder.id}/close`, { paymentMethod, tip: tipAmount }, { headers: authHeaders() })
-    setDrawerOpen(false)
+  const resetComanda = () => {
+    setModalOpen(false)
     setActiveOrder(null)
     setSelectedTable(null)
     setShowPayment(false)
     setPaymentMethod("")
     setTipAmount(0)
-    await fetchTables()
+    setProductSearch("")
+    setCategoryFilter("Todas")
+    setPane("products")
+    setQuantities({})
   }
 
-  const handleAddTable = async () => {
-    const nextNumber = tables.length > 0 ? Math.max(...tables.map(t => t.number)) + 1 : 1
-    await api.post("/tables", { number: nextNumber, restaurantId }, { headers: authHeaders() })
-    fetchTables()
-  }
-
-  const handleDeleteTable = (id: string, e: React.MouseEvent) => {
-    e.stopPropagation()
-    const table = tables.find(t => t.id === id)
-    setConfirmModal({
-      title: "Eliminar mesa",
-      message: `¿Estás seguro de que quieres eliminar la Mesa ${table?.number ?? ""}? Esta acción no se puede deshacer.`,
-      onConfirm: async () => {
-        await api.delete(`/tables/${id}`, { headers: authHeaders() })
-        setTables(prev => prev.filter(t => t.id !== id))
-        setConfirmModal(null)
-      },
-    })
-  }
-
-  const handleRemoveItem = async (itemId: string) => {
-    await api.delete(`/orders/items/${itemId}`, { headers: authHeaders() })
-    const res = await api.get(`/orders/${activeOrder!.id}`, { headers: authHeaders() })
-    setActiveOrder(res.data)
-  }
-
-  const handleDrawerClose = () => {
-    if (activeOrder?.items?.length) {
-      setConfirmModal({
-        title: "¿Cerrar sin guardar?",
-        message: "La mesa tiene productos añadidos. ¿Deseas cerrar el panel? La orden quedará abierta y podrás retomar desde la mesa.",
-        onConfirm: () => {
-          setDrawerOpen(false)
-          setActiveOrder(null)
-          setSelectedTable(null)
-          setShowPayment(false)
-          setConfirmModal(null)
-        },
-      })
-    } else {
-      setDrawerOpen(false)
+  const openTable = async (table: Table) => {
+    if (openingId) return
+    setOpeningId(table.id)
+    try {
+      const existing = await api.get(`/orders/table/${table.id}`)
+      let order: Order | null = existing.data
+      // una orden vacía de otro día se cancela y se abre una nueva; si no, la venta quedaría con fecha vieja y no saldría en el dashboard
+      if (order && !order.items?.length && !isToday(order.createdAt)) {
+        await api.patch(`/orders/${order.id}/cancel`)
+        order = null
+      }
+      if (!order) {
+        const created = await api.post("/orders", { tableId: table.id, restaurantId })
+        order = { ...created.data, items: created.data.items ?? [] }
+      }
+      setSelectedTable(table)
+      setActiveOrder(order)
+      setPane("products")
+      setShowPayment(false)
+      setPaymentMethod("")
+      setTipAmount(0)
+      setModalOpen(true)
+    } catch (err) {
+      toast.error(apiMessage(err, "No se pudo abrir la mesa."))
+    } finally {
+      setOpeningId(null)
     }
   }
 
@@ -182,353 +158,655 @@ export default function TablesPage() {
   const changeQty = (productId: string, delta: number) =>
     setQuantities(q => ({ ...q, [productId]: Math.max(1, (q[productId] ?? 1) + delta) }))
 
-  const subtotal       = activeOrder?.total ?? 0
-  const totalConPropina = subtotal + tipAmount
+  const addProduct = async (product: Product) => {
+    if (!activeOrder || !selectedTable) return
+    const quantity = getQty(product.id)
+    if (product.stock < quantity) {
+      toast.error(product.stock === 0 ? `${product.name} está agotado.` : `Solo quedan ${product.stock} de ${product.name}.`)
+      return
+    }
 
-  const filteredTables   = tables.filter(t => t.number.toString().includes(tableSearch.trim()))
-  const filteredProducts = products.filter(p =>
-    p.name.toLowerCase().includes(productSearch.toLowerCase().trim()) ||
-    p.category?.name.toLowerCase().includes(productSearch.toLowerCase().trim())
-  )
+    const prevOrder = activeOrder
+    const prevProducts = products
+    const tableId = selectedTable.id
+    const existingItem = activeOrder.items?.find((i: OrderItem) => i.product.id === product.id)
 
-  const disponibles = tables.filter(t => t.status === "DISPONIBLE").length
-  const ocupadas    = tables.filter(t => t.status === "OCUPADA").length
+    const optimisticItems = existingItem
+      ? activeOrder.items.map((i: OrderItem) =>
+          i.product.id === product.id ? { ...i, quantity: i.quantity + quantity } : i
+        )
+      : [
+          ...(activeOrder.items ?? []),
+          {
+            id: `temp-${product.id}`,
+            orderId: activeOrder.id,
+            productId: product.id,
+            quantity,
+            unitPrice: product.price,
+            product,
+          } as unknown as OrderItem,
+        ]
+    const optimisticTotal = optimisticItems.reduce((sum: number, i: OrderItem) => sum + i.unitPrice * i.quantity, 0)
+
+    setActiveOrder({ ...activeOrder, items: optimisticItems, total: optimisticTotal })
+    setProducts(prev => prev.map(p => p.id === product.id ? { ...p, stock: p.stock - quantity } : p))
+    setQuantities(q => ({ ...q, [product.id]: 1 }))
+    setTables(prev => prev && prev.map(t => t.id === tableId ? { ...t, status: "OCUPADA" } : t))
+    setPending(n => n + 1)
+
+    try {
+      const { data: savedItem } = await api.post(`/orders/${activeOrder.id}/items`, { productId: product.id, quantity })
+      setActiveOrder(prev => {
+        if (!prev) return prev
+        const items = prev.items.map((i: OrderItem) =>
+          i.id === `temp-${product.id}` ? { ...savedItem, product } : i
+        )
+        const total = items.reduce((sum: number, i: OrderItem) => sum + i.unitPrice * i.quantity, 0)
+        return { ...prev, items, total }
+      })
+    } catch (err) {
+      setActiveOrder(prevOrder)
+      setProducts(prevProducts)
+      toast.error(apiMessage(err, "No se pudo agregar el producto."))
+    } finally {
+      setPending(n => n - 1)
+    }
+  }
+
+  const removeItem = async (itemId: string) => {
+    if (!activeOrder) return
+    try {
+      await api.delete(`/orders/items/${itemId}`)
+      const res = await api.get(`/orders/${activeOrder.id}`)
+      setActiveOrder(res.data)
+      fetchProducts()
+    } catch (err) {
+      toast.error(apiMessage(err, "No se pudo quitar el producto."))
+    }
+  }
+
+  // "cuenta" para que el cliente la revise, "pago" al cobrar
+  const receiptOps = (kind: ReceiptData["kind"], extra: Partial<ReceiptData> = {}) => {
+    if (!activeOrder || !selectedTable) return null
+    return buildReceipt({
+      kind,
+      restaurant: user?.restaurantName ?? "Restaurante",
+      table: selectedTable.number,
+      orderCode: activeOrder.id.slice(0, 8),
+      waiter: user?.name,
+      date: new Date(),
+      items: (activeOrder.items ?? []).map(i => ({ name: i.product.name, quantity: i.quantity, unitPrice: i.unitPrice })),
+      subtotal: activeOrder.total,
+      footer: printer.settings.footer,
+      ...extra,
+    })
+  }
+
+  const reportPrintError = (err: unknown) => {
+    if (err instanceof PrinterError && err.code === "NOT_CONNECTED") {
+      toast.info(err.message)
+      window.dispatchEvent(new Event(OPEN_PRINTER_EVENT))
+    } else {
+      toast.error(err instanceof PrinterError ? err.message : "No se pudo imprimir.")
+    }
+  }
+
+  const printBill = async () => {
+    if (!activeOrder?.items?.length || pending > 0) return
+    const ops = receiptOps("cuenta")
+    if (!ops) return
+    // sin USB en este navegador, diálogo de impresión
+    if (!printer.supported) { printer.printInBrowser(ops); return }
+    try {
+      await printer.print(ops)
+      toast.success("Cuenta enviada a la impresora.")
+    } catch (err) {
+      reportPrintError(err)
+    }
+  }
+
+  const closeOrder = async () => {
+    if (!activeOrder || !selectedTable || !paymentMethod || submitting || pending > 0) return
+    setSubmitting(true)
+    // se arma antes de cerrar, con la comanda todavía abierta
+    const ticket = canPrint && printer.settings.autoPrint && printer.status === "ready"
+      ? receiptOps("pago", { paymentMethod, tip: tipAmount })
+      : null
+    try {
+      await api.patch(`/orders/${activeOrder.id}/close`, { paymentMethod, tip: tipAmount })
+      toast.success(`Mesa ${selectedTable.number} cerrada · ${cop(activeOrder.total + tipAmount)}`)
+      resetComanda()
+      if (ticket) printer.print(ticket).catch(reportPrintError)
+      await fetchTables()
+    } catch (err) {
+      toast.error(apiMessage(err, "No se pudo cerrar la cuenta."))
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const cancelActiveOrder = async () => {
+    if (!activeOrder) return
+    try {
+      await api.patch(`/orders/${activeOrder.id}/cancel`)
+      toast.success("Orden cancelada. Los productos volvieron al inventario.")
+      resetComanda()
+      fetchTables()
+      fetchProducts()
+    } catch (err) {
+      toast.error(apiMessage(err, "No se pudo cancelar la orden."))
+    }
+  }
+
+  const requestCloseModal = () => {
+    if (submitting) return
+    if (activeOrder?.items?.length) {
+      setConfirm({
+        title: "¿Cerrar sin cobrar?",
+        message: "La mesa tiene productos. La cuenta queda abierta y puedes retomarla desde la mesa.",
+        confirmLabel: "Cerrar panel",
+        tone: "primary",
+        onConfirm: () => { resetComanda(); fetchTables() },
+      })
+      return
+    }
+    // una orden vacía no sirve: se cancela para no dejar cuentas fantasma
+    const orderId = activeOrder?.id
+    resetComanda()
+    if (orderId) {
+      api.patch(`/orders/${orderId}/cancel`).catch(() => {}).finally(() => fetchTables())
+    }
+  }
+
+  const requestCancelOrder = () => {
+    setConfirm({
+      title: "¿Cancelar la orden?",
+      message: "Se borran los productos de la cuenta y vuelven al inventario. La mesa queda disponible.",
+      confirmLabel: "Sí, cancelar orden",
+      tone: "danger",
+      onConfirm: cancelActiveOrder,
+    })
+  }
+
+  const handleAddTable = async () => {
+    if (!tables || creatingTable) return
+    setCreatingTable(true)
+    try {
+      const nextNumber = tables.length > 0 ? Math.max(...tables.map(t => t.number)) + 1 : 1
+      await api.post("/tables", { number: nextNumber, restaurantId })
+      await fetchTables()
+      toast.success(`Mesa ${nextNumber} creada.`)
+    } catch (err) {
+      toast.error(apiMessage(err, "No se pudo crear la mesa."))
+    } finally {
+      setCreatingTable(false)
+    }
+  }
+
+  const requestDeleteTable = (table: Table) => {
+    setConfirm({
+      title: "Eliminar mesa",
+      message: `¿Seguro que quieres eliminar la Mesa ${table.number}? Esta acción no se puede deshacer.`,
+      confirmLabel: "Sí, eliminar",
+      tone: "danger",
+      onConfirm: async () => {
+        try {
+          await api.delete(`/tables/${table.id}`)
+          setTables(prev => prev && prev.filter(t => t.id !== table.id))
+          toast.success(`Mesa ${table.number} eliminada.`)
+        } catch (err) {
+          toast.error(apiMessage(err, "No se pudo eliminar la mesa."))
+        }
+      },
+    })
+  }
+
+  const runConfirm = async () => {
+    if (!confirm) return
+    setConfirmBusy(true)
+    try {
+      await confirm.onConfirm()
+    } finally {
+      setConfirmBusy(false)
+      setConfirm(null)
+    }
+  }
+
+  const subtotal = activeOrder?.total ?? 0
+  const itemCount = activeOrder?.items?.reduce((n, i) => n + i.quantity, 0) ?? 0
+  const totalWithTip = subtotal + tipAmount
+  const tenPercent = Math.round((subtotal * 0.1) / 100) * 100
+
+  const categories = useMemo(() => {
+    const names = new Set<string>()
+    products.forEach(p => { if (p.category?.name) names.add(p.category.name) })
+    return ["Todas", ...Array.from(names).sort((a, b) => a.localeCompare(b))]
+  }, [products])
+
+  const filteredProducts = useMemo(() => {
+    const q = productSearch.toLowerCase().trim()
+    return products.filter(p => {
+      const matchCat = categoryFilter === "Todas" || p.category?.name === categoryFilter
+      const matchText = !q || p.name.toLowerCase().includes(q) || (p.category?.name.toLowerCase().includes(q) ?? false)
+      return matchCat && matchText
+    })
+  }, [products, productSearch, categoryFilter])
+
+  const free = tables?.filter(t => t.status === "DISPONIBLE").length ?? 0
+  const busy = tables?.filter(t => t.status === "OCUPADA").length ?? 0
+
+  const visibleTables = (tables ?? []).filter(t => {
+    const matchText = t.number.toString().includes(tableSearch.trim())
+    const matchFilter = filter === "all" || (filter === "busy" ? t.status === "OCUPADA" : t.status === "DISPONIBLE")
+    return matchText && matchFilter
+  })
+
+  const openOrderOf = (t: Table) => t.orders?.[0]
+  const comandaOpenSince = selectedTable ? openOrderOf(selectedTable)?.createdAt : undefined
 
   return (
-    <div className="flex flex-col h-screen overflow-hidden">
-      <div className="flex-1 overflow-y-auto px-7 py-6 flex flex-col gap-6">
+    <div className="flex min-h-0 flex-1 flex-col">
+      <TopBar title="Mesas">
+        {isAdmin && (
+          <Button onClick={handleAddTable} loading={creatingTable} disabled={!tables}>
+            <Plus size={17} /> <span className="max-sm:hidden">Nueva mesa</span><span className="sm:hidden">Nueva</span>
+          </Button>
+        )}
+      </TopBar>
 
-        {/* Header */}
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-[21px] font-extrabold text-[#e6edf3]">Mesas</h1>
-            <p className="text-sm text-[#8b949e] mt-1">{disponibles} disponibles · {ocupadas} ocupadas</p>
-          </div>
-          <button
-            onClick={handleAddTable}
-            className="flex items-center gap-2 px-4 py-[9px] rounded-[9px] bg-orange-500 text-white font-bold text-sm border-none cursor-pointer shadow-[0_0_12px_#f9731640] hover:bg-orange-600 transition-colors"
-          >
-            <Plus size={15} /> Nueva mesa
-          </button>
-        </div>
+      <div className="flex-1 overflow-y-auto px-4 pb-8 pt-2 md:px-7">
+        <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+          <p className="text-soft">
+            <span className="font-semibold text-ink tnum">{free}</span> disponibles ·{" "}
+            <span className="font-semibold text-ink tnum">{busy}</span> ocupadas
+          </p>
 
-        {/* Buscador de mesas */}
-        <div className="relative max-w-[240px]">
-          <Search className="absolute left-[11px] top-1/2 -translate-y-1/2 text-[#8b949e]" size={14} />
-          <input
-            type="text"
-            value={tableSearch}
-            onChange={e => setTableSearch(e.target.value)}
-            placeholder="Buscar mesa..."
-            aria-label="Buscar mesa por número"
-            className="w-full bg-[#1c2128] text-[#e6edf3] rounded-lg pl-[34px] pr-3.5 py-2 text-[13px] border border-white/8 outline-none"
-          />
-        </div>
-
-        {/* Grid de mesas */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-4">
-          {filteredTables.map(table => {
-            const isOcupada = table.status === "OCUPADA"
-            return (
-              <div
-                key={table.id}
-                onClick={() => handleTableClick(table)}
-                className={`rounded-xl border-2 cursor-pointer transition-all hover:scale-105 p-4 flex flex-col gap-3 ${
-                  isOcupada
-                    ? "bg-orange-500/10 border-orange-500"
-                    : "bg-[#1c2128] border-[#30363d] hover:border-green-500"
-                }`}
-              >
-                <div className="flex items-center justify-between">
-                  <div className={`p-2 rounded-lg ${isOcupada ? "bg-orange-500/20" : "bg-[#21262d]"}`}>
-                    <UtensilsCrossed className={`h-5 w-5 ${isOcupada ? "text-orange-400" : "text-[#8b949e]"}`} />
-                  </div>
-                  <button
-                    onClick={e => handleDeleteTable(table.id, e)}
-                    aria-label={`Eliminar mesa ${table.number}`}
-                    className="text-[#484f58] hover:text-[#f87171] transition-colors bg-transparent border-none cursor-pointer"
-                  >
-                    <Trash2 size={16} />
-                  </button>
-                </div>
-                <div>
-                  <p className="text-[#e6edf3] font-bold text-lg">Mesa {table.number}</p>
-                  <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
-                    isOcupada ? "bg-orange-500/20 text-orange-400" : "bg-green-500/20 text-green-400"
-                  }`}>
-                    {isOcupada ? "Ocupada" : "Disponible"}
-                  </span>
-                </div>
-              </div>
-            )
-          })}
-        </div>
-      </div>
-
-      {/* Drawer lateral */}
-      {drawerOpen && (
-        <div className="fixed inset-0 z-50 flex justify-end">
-          <div className="absolute inset-0 bg-black/50" onClick={handleDrawerClose} aria-hidden="true" />
-
-          <div className="relative w-full max-w-md bg-[#0d1117] border-l border-white/8 flex flex-col h-full overflow-hidden">
-
-            {/* Drawer header */}
-            <div className="flex items-center justify-between px-6 py-5 border-b border-white/8">
-              <div>
-                <h2 className="text-[#e6edf3] font-bold text-xl">Mesa {selectedTable?.number}</h2>
-                <p className="text-[#8b949e] text-sm mt-0.5">
-                  {loading ? "Cargando orden..." : `Orden #${activeOrder?.id.slice(0, 8) ?? "—"}`}
-                </p>
-              </div>
-              <button onClick={handleDrawerClose} aria-label="Cerrar panel de mesa" className="text-[#8b949e] hover:text-[#e6edf3] bg-transparent border-none cursor-pointer transition-colors">
-                <X size={24} />
-              </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex gap-1 rounded-lg bg-surface p-1" role="group" aria-label="Filtrar mesas">
+              {([["all", "Todas"], ["free", "Disponibles"], ["busy", "Ocupadas"]] as const).map(([value, label]) => (
+                <button
+                  key={value}
+                  onClick={() => setFilter(value)}
+                  aria-pressed={filter === value}
+                  className={cn(
+                    "h-9 rounded-md px-3 text-sm font-semibold transition-colors",
+                    filter === value ? "bg-brand text-brand-ink" : "text-soft hover:text-ink"
+                  )}
+                >
+                  {label}
+                </button>
+              ))}
             </div>
+            <div className="relative w-36 sm:w-44">
+              <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-faint" size={16} />
+              <Input
+                type="search"
+                inputMode="numeric"
+                value={tableSearch}
+                onChange={e => setTableSearch(e.target.value)}
+                placeholder="Nº de mesa"
+                aria-label="Buscar mesa por número"
+                className="h-10 pl-9"
+              />
+            </div>
+          </div>
+        </div>
 
-            {/* Drawer body */}
-            <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-5">
-
-              {/* Pedido actual */}
-              {activeOrder?.items?.length ? (
-                <div>
-                  <p className="text-[11px] font-bold tracking-[0.8px] text-[#484f58] uppercase mb-2.5">
-                    Pedido actual
-                  </p>
-                  <div className="bg-[#1c2128] border border-white/8 rounded-xl overflow-hidden">
-                    {activeOrder.items.map((item: OrderItem, i: number) => (
-                      <div
-                        key={item.id}
-                        className="flex items-center justify-between px-4 py-[11px]"
-                        style={{ borderBottom: i < activeOrder.items.length - 1 ? "1px solid rgba(255,255,255,0.05)" : "none" }}
-                      >
-                        <div className="flex-1">
-                          <p className="text-[#e6edf3] text-[13px] font-semibold">{item.product.name}</p>
-                          <p className="text-[#8b949e] text-[11px] mt-0.5">
-                            x{item.quantity} · ${item.unitPrice.toLocaleString()} c/u
-                          </p>
-                        </div>
-                        <div className="flex items-center gap-3">
-                          <span className="text-orange-500 font-bold text-sm">
-                            ${(item.quantity * item.unitPrice).toLocaleString()}
-                          </span>
-                          <button
-                            onClick={() => handleRemoveItem(item.id)}
-                            aria-label={`Eliminar ${item.product.name} de la orden`}
-                            className="text-[#484f58] hover:text-[#f87171] bg-transparent border-none cursor-pointer flex transition-colors"
-                          >
-                            <Trash2 size={15} />
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                    <div className="flex justify-between items-center px-4 py-3 border-t border-white/8">
-                      <span className="text-[#8b949e] font-semibold text-[13px]">Total orden</span>
-                      <span className="text-orange-500 font-extrabold text-base">${activeOrder.total.toLocaleString()}</span>
-                    </div>
-                  </div>
-                </div>
-              ) : null}
-
-              {/* Agregar productos */}
-              <div className="flex-1">
-                <p className="text-[11px] font-bold tracking-[0.8px] text-[#484f58] uppercase mb-2.5">
-                  Agregar productos
-                </p>
-
-                <div className="relative mb-3">
-                  <Search className="absolute left-[11px] top-1/2 -translate-y-1/2 text-[#8b949e]" size={14} />
-                  <input
-                    type="text"
-                    value={productSearch}
-                    onChange={e => setProductSearch(e.target.value)}
-                    placeholder="Buscar por nombre o categoría..."
-                    aria-label="Buscar producto"
-                    className="w-full bg-[#161b22] text-[#e6edf3] rounded-lg pl-[34px] pr-3.5 py-[9px] text-[13px] border border-white/8 outline-none"
-                  />
-                </div>
-
-                <div className="grid grid-cols-2 gap-2">
-                  {filteredProducts.map(product => (
-                    <div
-                      key={product.id}
-                      className="bg-[#161b22] border border-white/[0.07] rounded-[10px] p-3 flex flex-col gap-1.5"
+        {tables === null ? (
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5" aria-busy="true">
+            {Array.from({ length: 8 }).map((_, i) => (
+              <div key={i} className="h-[7.5rem] animate-pulse rounded-lg bg-surface" />
+            ))}
+          </div>
+        ) : tables.length === 0 ? (
+          <div className="rounded-xl bg-surface px-6 py-12 text-center">
+            <p className="font-display text-lg font-bold">Todavía no hay mesas</p>
+            <p className="mt-1 text-soft">
+              {isAdmin ? "Crea la primera con el botón «Nueva mesa»." : "Pídele al administrador que cree las mesas."}
+            </p>
+          </div>
+        ) : visibleTables.length === 0 ? (
+          <p className="py-10 text-center text-soft">Ninguna mesa coincide con la búsqueda.</p>
+        ) : (
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5">
+            {visibleTables.map(table => {
+              const isBusy = table.status === "OCUPADA"
+              const order = openOrderOf(table)
+              const opening = openingId === table.id
+              return (
+                <div key={table.id} className="relative">
+                  <button
+                    onClick={() => openTable(table)}
+                    disabled={openingId !== null}
+                    aria-label={`Mesa ${table.number}, ${isBusy ? "ocupada" : "disponible"}`}
+                    className={cn(
+                      "flex min-h-[7.5rem] w-full flex-col gap-2 rounded-lg p-4 text-left transition-colors disabled:cursor-wait",
+                      isBusy ? "bg-hot/20 hover:bg-hot/30" : "bg-surface hover:bg-surface-2"
+                    )}
+                  >
+                    <span className="font-display text-3xl font-extrabold leading-none tnum">{table.number}</span>
+                    <span className="flex items-center gap-2 text-[15px] font-semibold">
+                      <span className={cn("size-2.5 rounded-full", isBusy ? "bg-hot" : "bg-good")} aria-hidden />
+                      {isBusy ? "Ocupada" : "Disponible"}
+                    </span>
+                    <span className="text-sm text-soft tnum">
+                      {isBusy && order ? `${cop(order.total)} · ${elapsed(order.createdAt, now)}` : isBusy ? "Con pedido" : "Sin orden"}
+                    </span>
+                    {opening && (
+                      <Loader2 size={18} className="absolute bottom-3 right-3 animate-spin text-soft" aria-hidden />
+                    )}
+                  </button>
+                  {isAdmin && (
+                    <button
+                      onClick={() => requestDeleteTable(table)}
+                      aria-label={`Eliminar mesa ${table.number}`}
+                      className="absolute right-1.5 top-1.5 grid size-9 place-items-center rounded-md text-faint transition-colors hover:bg-bad/15 hover:text-bad"
                     >
-                      <span className="text-[10px] font-bold tracking-[0.4px] text-[#8b949e] uppercase">
-                        {product.category?.name ?? "—"}
-                      </span>
-                      <p className="text-[#e6edf3] font-semibold text-[13px] leading-snug flex-1">
-                        {product.name}
-                      </p>
-                      <p className="text-orange-500 font-bold text-[15px]">
-                        ${product.price.toLocaleString()}
-                      </p>
-                      <div className="flex items-center gap-1 mt-0.5">
-                        <button
-                          onClick={() => changeQty(product.id, -1)}
-                          aria-label={`Reducir cantidad de ${product.name}`}
-                          className="w-[26px] h-[26px] flex items-center justify-center bg-white/[0.06] border border-white/8 text-[#e6edf3] rounded-[6px] cursor-pointer shrink-0 hover:bg-white/10 transition-colors"
-                        >
-                          <Minus size={11} />
-                        </button>
-                        <span className="text-[#e6edf3] font-bold text-[13px] w-5 text-center">
-                          {getQty(product.id)}
-                        </span>
-                        <button
-                          onClick={() => changeQty(product.id, 1)}
-                          aria-label={`Aumentar cantidad de ${product.name}`}
-                          className="w-[26px] h-[26px] flex items-center justify-center bg-white/[0.06] border border-white/8 text-[#e6edf3] rounded-[6px] cursor-pointer shrink-0 hover:bg-white/10 transition-colors"
-                        >
-                          <Plus size={11} />
-                        </button>
-                        <button
-                          onClick={() => handleAddProduct(product.id, getQty(product.id))}
-                          aria-label={`Agregar ${product.name} a la orden`}
-                          className="flex-1 bg-orange-500/15 border border-orange-500/30 text-orange-500 rounded-[6px] py-[5px] text-[11px] font-bold cursor-pointer hover:bg-orange-500/25 transition-colors"
-                        >
-                          + Agregar
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-
-                  {filteredProducts.length === 0 && (
-                    <div className="col-span-2 text-center py-6 text-[#484f58] text-[13px]">
-                      Sin resultados
-                    </div>
+                      <Trash2 size={16} />
+                    </button>
                   )}
                 </div>
+              )
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* comanda encima de las mesas */}
+      <Modal
+        open={modalOpen}
+        onClose={requestCloseModal}
+        title={selectedTable ? `Mesa ${selectedTable.number}` : "Mesa"}
+        subtitle={
+          activeOrder
+            ? `Orden #${activeOrder.id.slice(0, 8)}${comandaOpenSince ? ` · abierta hace ${elapsed(comandaOpenSince, now)}` : ""}`
+            : undefined
+        }
+        size="xl"
+        tall
+        fullOnMobile
+        bodyClassName="overflow-hidden"
+      >
+        <div className="flex h-full min-h-0 flex-col md:grid md:grid-cols-[minmax(0,1fr)_23rem]">
+          {/* pestañas, solo en celular */}
+          <div className="flex gap-1 px-4 pb-3 md:hidden" role="tablist" aria-label="Secciones de la comanda">
+            {([["products", "Productos"], ["account", `Cuenta (${itemCount})`]] as const).map(([value, label]) => (
+              <button
+                key={value}
+                role="tab"
+                aria-selected={pane === value}
+                onClick={() => setPane(value)}
+                className={cn(
+                  "h-11 flex-1 rounded-md text-[15px] font-semibold transition-colors",
+                  pane === value ? "bg-brand text-brand-ink" : "bg-surface-2 text-soft"
+                )}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          <section
+            className={cn(
+              "min-h-0 flex-col overflow-y-auto px-4 pb-4 md:flex md:px-6",
+              pane === "products" ? "flex flex-1" : "hidden"
+            )}
+          >
+            <div className="sticky top-0 z-10 -mx-4 flex flex-col gap-2.5 bg-surface px-4 pb-3 md:-mx-6 md:px-6">
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-faint" size={16} />
+                <Input
+                  type="search"
+                  value={productSearch}
+                  onChange={e => setProductSearch(e.target.value)}
+                  placeholder="Buscar por nombre o categoría"
+                  aria-label="Buscar producto"
+                  className="pl-9"
+                />
               </div>
+              {categories.length > 2 && (
+                <div className="-mx-4 flex gap-1.5 overflow-x-auto px-4 pb-1 md:-mx-6 md:px-6" role="group" aria-label="Filtrar por categoría">
+                  {categories.map(c => (
+                    <button
+                      key={c}
+                      onClick={() => setCategoryFilter(c)}
+                      aria-pressed={categoryFilter === c}
+                      className={cn(
+                        "h-9 shrink-0 rounded-md px-3 text-sm font-semibold transition-colors",
+                        categoryFilter === c ? "bg-brand text-brand-ink" : "bg-surface-2 text-soft hover:text-ink"
+                      )}
+                    >
+                      {c}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
 
-            {/* Drawer footer */}
-            <div className="p-4 border-t border-white/8 flex flex-col gap-3">
-              {!showPayment ? (
-                <>
-                  <button
-                    onClick={() => setShowPayment(true)}
-                    className="w-full flex items-center justify-center gap-2 bg-green-600 hover:bg-green-700 text-white font-bold py-3 rounded-xl border-none cursor-pointer transition-colors text-sm"
-                  >
-                    <CheckCircle size={20} />
-                    Cerrar cuenta · ${activeOrder?.total.toLocaleString() ?? 0}
-                  </button>
-                  <button
-                    onClick={handleDrawerClose}
-                    className="w-full flex items-center justify-center gap-2 bg-transparent border border-white/8 text-[#8b949e] hover:bg-white/5 font-semibold py-3 rounded-xl cursor-pointer transition-colors text-sm"
-                  >
-                    <ShoppingBag size={20} />
-                    Seguir agregando
-                  </button>
-                </>
-              ) : (
-                <>
-                  <p className="text-[#8b949e] text-sm font-medium uppercase tracking-wide">Método de pago</p>
-                  <div className="grid grid-cols-3 gap-2">
-                    {["Efectivo", "Datafono", "Nequi"].map(method => (
+            <div className="grid grid-cols-1 gap-2.5 min-[440px]:grid-cols-2 2xl:grid-cols-3">
+              {filteredProducts.map(product => {
+                const out = product.stock <= 0
+                const low = !out && product.stock <= product.minStock
+                return (
+                  <div key={product.id} className={cn("flex flex-col gap-2 rounded-lg bg-surface-2 p-3", out && "opacity-60")}>
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="text-[13px] text-soft">{product.category?.name ?? "Sin categoría"}</span>
+                      {out && <span className="text-[13px] font-semibold text-bad">Agotado</span>}
+                      {low && <span className="text-[13px] font-semibold text-warn">Quedan {product.stock}</span>}
+                    </div>
+                    <p className="flex-1 font-semibold leading-snug">{product.name}</p>
+                    <p className="font-display text-lg font-bold tnum">{cop(product.price)}</p>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <div className="flex items-center gap-1">
                       <button
-                        key={method}
-                        onClick={() => setPaymentMethod(method)}
-                        aria-pressed={paymentMethod === method}
-                        className={`py-3 rounded-xl text-sm font-bold transition-all border-2 cursor-pointer ${
-                          paymentMethod === method
-                            ? "bg-orange-500 border-orange-500 text-white"
-                            : "bg-[#1c2128] border-white/8 text-[#8b949e] hover:border-orange-500"
-                        }`}
+                        onClick={() => changeQty(product.id, -1)}
+                        aria-label={`Reducir cantidad de ${product.name}`}
+                        className="grid size-10 shrink-0 place-items-center rounded-md bg-surface-3 hover:brightness-125"
                       >
-                        {method}
+                        <Minus size={15} />
                       </button>
-                    ))}
+                      <span className="w-6 text-center font-bold tnum">{getQty(product.id)}</span>
+                      <button
+                        onClick={() => changeQty(product.id, 1)}
+                        aria-label={`Aumentar cantidad de ${product.name}`}
+                        className="grid size-10 shrink-0 place-items-center rounded-md bg-surface-3 hover:brightness-125"
+                      >
+                        <Plus size={15} />
+                      </button>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="primary"
+                        className="h-10 min-w-[5.5rem] flex-1 px-2"
+                        disabled={out}
+                        onClick={() => addProduct(product)}
+                        aria-label={`Agregar ${product.name} a la orden`}
+                      >
+                        Agregar
+                      </Button>
+                    </div>
+                  </div>
+                )
+              })}
+              {filteredProducts.length === 0 && (
+                <p className="col-span-full py-8 text-center text-soft">Sin resultados.</p>
+              )}
+            </div>
+
+            <div className="sticky bottom-0 -mx-4 mt-4 border-t border-line bg-surface px-4 py-3 md:hidden">
+              <Button className="w-full" size="lg" onClick={() => setPane("account")}>
+                Ver cuenta · {itemCount} {itemCount === 1 ? "producto" : "productos"} · {cop(subtotal)}
+              </Button>
+            </div>
+          </section>
+
+          <aside
+            className={cn(
+              "min-h-0 flex-col bg-canvas/40 md:flex md:border-l md:border-line",
+              pane === "account" ? "flex flex-1" : "hidden"
+            )}
+          >
+            <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 md:px-5">
+              <h3 className="mb-2 font-display text-base font-bold">Pedido actual</h3>
+              {activeOrder?.items?.length ? (
+                <ul>
+                  {activeOrder.items.map((item: OrderItem) => (
+                    <li key={item.id} className="flex items-center justify-between gap-3 border-b border-line py-2.5 last:border-0">
+                      <div className="min-w-0">
+                        <p className="truncate font-semibold">{item.product.name}</p>
+                        <p className="text-sm text-soft tnum">{item.quantity} × {cop(item.unitPrice)}</p>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-1">
+                        <span className="font-bold tnum">{cop(item.quantity * item.unitPrice)}</span>
+                        <button
+                          onClick={() => removeItem(item.id)}
+                          disabled={item.id.startsWith("temp-")}
+                          aria-label={`Quitar ${item.product.name} de la orden`}
+                          className="grid size-10 place-items-center rounded-md text-faint transition-colors hover:bg-bad/15 hover:text-bad disabled:opacity-40"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="py-6 text-soft">Todavía no hay productos. Agrégalos desde la lista.</p>
+              )}
+
+              {showPayment && (
+                <div className="mt-5 flex flex-col gap-4">
+                  <div>
+                    <h3 className="mb-2 font-display text-base font-bold">Método de pago</h3>
+                    <div className="grid grid-cols-3 gap-2">
+                      {PAYMENT_METHODS.map(method => (
+                        <button
+                          key={method}
+                          onClick={() => setPaymentMethod(method)}
+                          aria-pressed={paymentMethod === method}
+                          className={cn(
+                            "h-12 rounded-md text-[15px] font-semibold transition-colors",
+                            paymentMethod === method ? "bg-brand text-brand-ink" : "bg-surface-2 text-soft hover:text-ink"
+                          )}
+                        >
+                          {method}
+                        </button>
+                      ))}
+                    </div>
                   </div>
 
-                  <div className="bg-[#1c2128] rounded-xl p-4 flex flex-col gap-3">
-                    <p className="text-[#8b949e] text-sm font-medium uppercase tracking-wide">Propina</p>
-                    <div className="grid grid-cols-4 gap-2">
-                      {[0, 2000, 5000, 10000].map(amount => (
+                  <div>
+                    <h3 className="mb-2 font-display text-base font-bold">Propina</h3>
+                    <div className="grid grid-cols-3 gap-2">
+                      {TIP_PRESETS.map(amount => (
                         <button
                           key={amount}
                           onClick={() => setTipAmount(amount)}
                           aria-pressed={tipAmount === amount}
-                          className={`py-2 rounded-lg text-xs font-bold transition-all border cursor-pointer ${
-                            tipAmount === amount
-                              ? "bg-orange-500 border-orange-500 text-white"
-                              : "bg-[#161b22] border-white/8 text-[#8b949e] hover:border-orange-400"
-                          }`}
+                          className={cn(
+                            "h-11 rounded-md text-sm font-semibold transition-colors",
+                            tipAmount === amount ? "bg-brand text-brand-ink" : "bg-surface-2 text-soft hover:text-ink"
+                          )}
                         >
-                          {amount === 0 ? "Sin propina" : `$${amount.toLocaleString()}`}
+                          {amount === 0 ? "Sin propina" : cop(amount)}
                         </button>
                       ))}
+                      {tenPercent > 0 && (
+                        <button
+                          onClick={() => setTipAmount(tenPercent)}
+                          aria-pressed={tipAmount === tenPercent}
+                          className={cn(
+                            "h-11 rounded-md text-sm font-semibold transition-colors",
+                            tipAmount === tenPercent ? "bg-brand text-brand-ink" : "bg-surface-2 text-soft hover:text-ink"
+                          )}
+                        >
+                          10% · {cop(tenPercent)}
+                        </button>
+                      )}
                     </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-[#8b949e] text-sm">$</span>
-                      <input
-                        type="number"
-                        min={0}
-                        value={tipAmount === 0 ? "" : tipAmount}
-                        onChange={e => setTipAmount(Math.max(0, Number(e.target.value)))}
-                        placeholder="Monto personalizado"
-                        aria-label="Monto de propina personalizado"
-                        className="w-full bg-[#161b22] text-[#e6edf3] rounded-lg px-3 py-2 text-sm border border-white/8 focus:border-orange-500 outline-none placeholder:text-[#484f58]"
-                      />
-                    </div>
-                    <div className="flex flex-col gap-1 pt-1 border-t border-white/8">
-                      <div className="flex justify-between text-sm">
-                        <span className="text-[#8b949e]">Subtotal</span>
-                        <span className="text-[#e6edf3]">${subtotal.toLocaleString()}</span>
-                      </div>
-                      <div className="flex justify-between text-sm">
-                        <span className="text-[#8b949e]">Propina</span>
-                        <span className="text-green-400">+${tipAmount.toLocaleString()}</span>
-                      </div>
-                      <div className="flex justify-between font-bold">
-                        <span className="text-[#e6edf3]">Total</span>
-                        <span className="text-orange-400 text-lg">${totalConPropina.toLocaleString()}</span>
-                      </div>
-                    </div>
+                    <Input
+                      type="number"
+                      inputMode="numeric"
+                      min={0}
+                      value={tipAmount === 0 ? "" : tipAmount}
+                      onChange={e => setTipAmount(Math.max(0, Number(e.target.value)))}
+                      placeholder="Otro valor"
+                      aria-label="Valor de propina personalizado"
+                      className="mt-2"
+                    />
+                    <p className="mt-1.5 text-sm text-faint">La propina es para el personal y no entra a los ingresos.</p>
                   </div>
+                </div>
+              )}
+            </div>
 
-                  <button
-                    onClick={handleCloseOrder}
-                    disabled={!paymentMethod}
-                    className="w-full flex items-center justify-center gap-2 bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white font-bold py-3 rounded-xl border-none cursor-pointer transition-colors text-sm disabled:cursor-not-allowed"
+            <div className="flex flex-col gap-2.5 border-t border-line px-4 py-4 pb-[max(1rem,env(safe-area-inset-bottom))] md:px-5">
+              {showPayment ? (
+                <div className="flex flex-col gap-1 text-[15px]">
+                  <div className="flex justify-between"><span className="text-soft">Subtotal</span><span className="tnum">{cop(subtotal)}</span></div>
+                  <div className="flex justify-between"><span className="text-soft">Propina</span><span className="tnum text-good">+ {cop(tipAmount)}</span></div>
+                  <div className="flex items-baseline justify-between pt-1">
+                    <span className="font-semibold">Total a cobrar</span>
+                    <span className="font-display text-2xl font-extrabold tnum">{cop(totalWithTip)}</span>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-baseline justify-between">
+                  <span className="font-semibold text-soft">Total</span>
+                  <span className="font-display text-2xl font-extrabold tnum">{cop(subtotal)}</span>
+                </div>
+              )}
+
+              {!showPayment ? (
+                <>
+                  <Button size="lg" disabled={!activeOrder?.items?.length || pending > 0} onClick={() => setShowPayment(true)}>
+                    <CheckCircle2 size={19} /> Cerrar cuenta
+                  </Button>
+                  {canPrint && (
+                    <Button variant="secondary" disabled={!activeOrder?.items?.length || pending > 0} onClick={printBill}>
+                      <Printer size={17} /> Imprimir cuenta
+                    </Button>
+                  )}
+                  <Button variant="secondary" className="md:hidden" onClick={() => setPane("products")}>
+                    Seguir agregando
+                  </Button>
+                  {!!activeOrder?.items?.length && (
+                    <Button variant="ghost" size="sm" className="text-bad hover:text-bad" onClick={requestCancelOrder}>
+                      Cancelar orden
+                    </Button>
+                  )}
+                </>
+              ) : (
+                <>
+                  <Button
+                    size="lg"
+                    variant="success"
+                    loading={submitting}
+                    disabled={!paymentMethod || pending > 0}
+                    onClick={closeOrder}
                   >
-                    <CheckCircle size={20} />
-                    Confirmar · ${totalConPropina.toLocaleString()}
-                  </button>
-                  <button
-                    onClick={() => setShowPayment(false)}
-                    className="w-full bg-transparent border border-white/8 text-[#8b949e] hover:bg-white/5 font-semibold py-3 rounded-xl cursor-pointer transition-colors text-sm"
-                  >
+                    <CheckCircle2 size={19} /> Confirmar {cop(totalWithTip)}
+                  </Button>
+                  <Button variant="secondary" onClick={() => setShowPayment(false)} disabled={submitting}>
                     Volver
-                  </button>
+                  </Button>
                 </>
               )}
             </div>
-          </div>
+          </aside>
         </div>
-      )}
+      </Modal>
 
-      {/* Modal de confirmación */}
-      {confirmModal && (
-        <div className="fixed inset-0 z-[100] bg-black/60 flex items-center justify-center p-5">
-          <div className="scale-in bg-[#161b22] border border-white/8 rounded-[14px] w-full max-w-[400px] p-6">
-            <h3 className="font-bold text-[16px] text-[#e6edf3] mb-2.5">{confirmModal.title}</h3>
-            <p className="text-[#8b949e] text-sm leading-relaxed mb-5">{confirmModal.message}</p>
-            <div className="flex gap-2.5">
-              <button
-                onClick={() => setConfirmModal(null)}
-                className="flex-1 py-2.5 rounded-[9px] bg-transparent border border-white/8 text-[#8b949e] font-semibold text-sm cursor-pointer hover:bg-white/5 transition-colors"
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={confirmModal.onConfirm}
-                className="flex-1 py-2.5 rounded-[9px] bg-red-400/15 border border-red-400/25 text-[#f87171] font-bold text-sm cursor-pointer hover:bg-red-400/25 transition-colors"
-              >
-                Confirmar
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ConfirmDialog
+        open={confirm !== null}
+        title={confirm?.title ?? ""}
+        message={confirm?.message ?? ""}
+        confirmLabel={confirm?.confirmLabel}
+        tone={confirm?.tone}
+        loading={confirmBusy}
+        onConfirm={runConfirm}
+        onCancel={() => setConfirm(null)}
+      />
     </div>
   )
 }

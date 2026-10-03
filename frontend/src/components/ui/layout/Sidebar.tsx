@@ -5,23 +5,29 @@ import { usePathname, useRouter } from "next/navigation"
 import Link from "next/link"
 import Image from "next/image"
 import {
-  LayoutDashboard, Package, UtensilsCrossed, LogOut,
-  ChefHat, Calendar, TrendingUp, ShoppingCart,
-  Moon, FileDown, X, CheckCircle, Loader2, Users, Menu
+  LayoutDashboard, Package, UtensilsCrossed, LogOut, ChefHat, Calendar,
+  TrendingUp, ShoppingCart, Moon, FileDown, Loader2, Users, Ellipsis, Printer,
+  type LucideIcon,
 } from "lucide-react"
-import api from "@/lib/axios"
-import { useCurrentUser, authHeaders, clearSession } from "@/lib/auth"
 
-const ADMIN_NAV = [
-  { href: "/dashboard",  icon: LayoutDashboard, label: "Dashboard" },
-  { href: "/tables",     icon: UtensilsCrossed, label: "Mesas" },
-  { href: "/inventory",  icon: Package,          label: "Inventario" },
-  { href: "/purchases",  icon: ShoppingCart,     label: "Compras y Gastos" },
-  { href: "/employees",  icon: Users,            label: "Empleados" },
+import { useCurrentUser, clearSession } from "@/lib/auth"
+import { OPEN_PRINTER_EVENT } from "@/lib/printer"
+import { cn } from "@/lib/utils"
+import { Modal } from "@/components/ui/modal"
+import { useDayActions } from "@/components/ui/layout/DayActions"
+
+type NavItem = { href: string; icon: LucideIcon; label: string; short: string }
+
+const ADMIN_NAV: NavItem[] = [
+  { href: "/dashboard", icon: LayoutDashboard, label: "Dashboard",        short: "Inicio" },
+  { href: "/tables",    icon: UtensilsCrossed, label: "Mesas",            short: "Mesas" },
+  { href: "/inventory", icon: Package,         label: "Inventario",       short: "Inventario" },
+  { href: "/purchases", icon: ShoppingCart,    label: "Compras y gastos", short: "Compras" },
+  { href: "/employees", icon: Users,           label: "Empleados",        short: "Equipo" },
 ]
 
-const EMPLOYEE_NAV = [
-  { href: "/tables", icon: UtensilsCrossed, label: "Mesas" },
+const EMPLOYEE_NAV: NavItem[] = [
+  { href: "/tables", icon: UtensilsCrossed, label: "Mesas", short: "Mesas" },
 ]
 
 const SOON = [
@@ -30,100 +36,33 @@ const SOON = [
   { icon: TrendingUp, label: "Reportes" },
 ]
 
-type ModalState = "idle" | "loading" | "success" | "error"
+// en celular la barra de abajo trae estos cuatro; el resto va en "Más"
+const PHONE_PRIMARY = ["/dashboard", "/tables", "/inventory", "/purchases"]
+
+const Logo = () => (
+  <div className="rounded-lg bg-plate px-2 py-1.5">
+    <Image src="/LogoRestaurantOS.png" alt="RestaurantOS" width={581} height={152} className="h-8 w-auto max-w-none" priority />
+  </div>
+)
+
+// solo el gorro del logo, para el menú angosto
+const LogoMark = () => (
+  <div className="rounded-lg bg-plate p-1">
+    <Image src="/LogoRestaurantOS.png" alt="RestaurantOS" width={581} height={152} className="size-9 object-cover object-left" priority />
+  </div>
+)
 
 export default function Sidebar() {
   const pathname = usePathname()
-  const router   = useRouter()
-
+  const router = useRouter()
   const { user, restaurantId, ready } = useCurrentUser()
-  const userRole = user?.role ?? "EMPLOYEE"
+  const [moreOpen, setMoreOpen] = useState(false)
+
+  const isAdmin = user?.role === "ADMIN"
+  const nav = isAdmin ? ADMIN_NAV : EMPLOYEE_NAV
   const userName = user?.name ?? ""
 
-  const [mobileOpen,     setMobileOpen]     = useState(false)
-  const [showCloseModal, setShowCloseModal] = useState(false)
-  const [closeState,     setCloseState]     = useState<ModalState>("idle")
-  const [closeMsg,       setCloseMsg]       = useState("")
-  const [pdfLoading,     setPdfLoading]     = useState(false)
-  const [showPdfConfirm, setShowPdfConfirm] = useState(false)
-
-  const NAV = userRole === "ADMIN" ? ADMIN_NAV : EMPLOYEE_NAV
-
-  const triggerBlobDownload = (blob: Blob, filename: string) => {
-    const url    = URL.createObjectURL(blob)
-    const anchor = document.createElement("a")
-    anchor.href     = url
-    anchor.download = filename
-    anchor.click()
-    URL.revokeObjectURL(url)
-  }
-
-  // ── Cerrar día ─────────────────────────────────────────────
-  const handleCloseDay = async () => {
-    if (!restaurantId) return
-    setCloseState("loading")
-    setCloseMsg("")
-
-    try {
-      await api.post(
-        "/daily-summary/close",
-        { restaurantId },
-        { headers: authHeaders() }
-      )
-      setCloseState("success")
-      setCloseMsg("El día se cerró correctamente. Las órdenes fueron archivadas.")
-      window.dispatchEvent(new Event("day-closed"))
-
-      try {
-        const pdfRes = await api.get(`/daily-summary/pdf/day/${restaurantId}`, {
-          headers: authHeaders(),
-          responseType: "blob",
-        })
-        const today = new Date().toLocaleDateString("es-CO").replace(/\//g, "-")
-        triggerBlobDownload(new Blob([pdfRes.data], { type: "application/pdf" }), `cierre-${today}.pdf`)
-      } catch {
-        // PDF fallido no bloquea el cierre
-      }
-    } catch (err: unknown) {
-      const msg =
-        (err as { response?: { data?: { message?: string } } })
-          ?.response?.data?.message ?? "Error al cerrar el día."
-      setCloseState("error")
-      setCloseMsg(msg)
-    }
-  }
-
-  const handleCloseModalDismiss = () => {
-    setShowCloseModal(false)
-    setCloseState("idle")
-    setCloseMsg("")
-    if (closeState === "success") router.refresh()
-  }
-
-  // ── Descargar PDF semanal ──────────────────────────────────
-  const handleDownloadPdfConfirmed = async () => {
-    if (!restaurantId || pdfLoading) return
-    setShowPdfConfirm(false)
-    setPdfLoading(true)
-
-    try {
-      const res = await api.get(`/daily-summary/pdf/${restaurantId}`, {
-        headers:      authHeaders(),
-        responseType: "blob",
-      })
-      const today = new Date().toLocaleDateString("es-CO").replace(/\//g, "-")
-      triggerBlobDownload(new Blob([res.data], { type: "application/pdf" }), `reporte-semanal-${today}.pdf`)
-
-      await api.delete(`/daily-summary/${restaurantId}`, {
-        headers: authHeaders(),
-      })
-      window.dispatchEvent(new Event("day-closed"))
-    } catch {
-      alert("No se pudo descargar el PDF. Intenta después de cerrar al menos un día.")
-    } finally {
-      setPdfLoading(false)
-    }
-  }
+  const { openClose, openPdf, pdfLoading, modals } = useDayActions(restaurantId)
 
   const handleLogout = () => {
     clearSession()
@@ -132,424 +71,180 @@ export default function Sidebar() {
 
   if (!ready) return null
 
-  const sidebarContent = (
-    <aside style={{
-      width: 240, background: "#161b22",
-      borderRight: "1px solid rgba(255,255,255,0.08)",
-      display: "flex", flexDirection: "column",
-      height: "100vh", flexShrink: 0,
-    }}>
-      {/* Logo */}
-      <div style={{ padding: "16px 18px", borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
-        <Image
-          src="/LogoRestaurantOS.png"
-          alt="RestaurantOS"
-          width={180}
-          height={60}
-          className="object-contain w-full h-auto"
-        />
-      </div>
+  const isActive = (href: string) => pathname.startsWith(href)
 
-      {/* Nav principal */}
-      <nav
-        aria-label="Navegación principal"
-        style={{ flex: 1, padding: "10px", display: "flex", flexDirection: "column", gap: 2, overflowY: "auto" }}
-      >
-        <div style={{
-          fontSize: 10, fontWeight: 700, color: "#484f58",
-          textTransform: "uppercase", letterSpacing: 1, padding: "6px 10px 8px",
-        }}>
-          Menú principal
+  const avatar = (
+    <div
+      className={cn(
+        "grid size-9 shrink-0 place-items-center rounded-full font-display text-sm font-bold",
+        isAdmin ? "bg-hot text-hot-ink" : "bg-brand text-brand-ink"
+      )}
+    >
+      {userName.charAt(0).toUpperCase() || "?"}
+    </div>
+  )
+
+  const actionBtn = "flex h-11 w-full items-center gap-3 rounded-md px-3 text-[15px] font-semibold text-soft transition-colors hover:bg-surface-2 hover:text-ink disabled:opacity-60 max-lg:justify-center max-lg:px-0"
+
+  return (
+    <>
+      {/* tablet y escritorio */}
+      <aside className="hidden h-dvh w-[76px] shrink-0 flex-col gap-4 bg-surface px-2.5 py-4 md:flex lg:w-[236px] lg:px-3.5">
+        <div className="px-1 max-lg:flex max-lg:justify-center">
+          <div className="hidden lg:block"><Logo /></div>
+          <div className="lg:hidden"><LogoMark /></div>
         </div>
 
-        {NAV.map(item => {
-          const active = pathname.startsWith(item.href)
-          const Icon   = item.icon
+        <nav aria-label="Navegación principal" className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto pt-2">
+          {nav.map(item => {
+            const active = isActive(item.href)
+            const Icon = item.icon
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                title={item.label}
+                aria-label={item.label}
+                aria-current={active ? "page" : undefined}
+                className={cn(
+                  "flex h-11 items-center gap-3 rounded-md px-3 text-[15px] font-semibold transition-colors max-lg:justify-center max-lg:px-0",
+                  active ? "bg-brand/15 text-brand" : "text-soft hover:bg-surface-2 hover:text-ink"
+                )}
+              >
+                <Icon size={19} className="shrink-0" />
+                <span className="max-lg:hidden">{item.label}</span>
+              </Link>
+            )
+          })}
+
+          {isAdmin && (
+            <div className="mt-5 hidden flex-col gap-1 lg:flex">
+              <p className="px-3 pb-1 text-sm text-faint">Próximamente</p>
+              {SOON.map(item => {
+                const Icon = item.icon
+                return (
+                  <div key={item.label} className="flex h-10 items-center gap-3 px-3 text-sm text-faint">
+                    <Icon size={17} />
+                    {item.label}
+                    <span className="ml-auto text-xs italic">pronto</span>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </nav>
+
+        <div className="flex flex-col gap-1 border-t border-line pt-3">
+          {isAdmin && (
+            <>
+              <button
+                onClick={() => window.dispatchEvent(new Event(OPEN_PRINTER_EVENT))}
+                title="Impresora"
+                aria-label="Impresora"
+                className={actionBtn}
+              >
+                <Printer size={18} className="shrink-0" />
+                <span className="max-lg:hidden">Impresora</span>
+              </button>
+              <button onClick={openClose} title="Cerrar día" aria-label="Cerrar día" className={cn(actionBtn, "text-hot hover:text-hot")}>
+                <Moon size={18} className="shrink-0" />
+                <span className="max-lg:hidden">Cerrar día</span>
+              </button>
+              <button onClick={openPdf} disabled={pdfLoading} title="Descargar PDF" aria-label="Descargar PDF" className={actionBtn}>
+                {pdfLoading ? <Loader2 size={18} className="shrink-0 animate-spin" /> : <FileDown size={18} className="shrink-0" />}
+                <span className="max-lg:hidden">{pdfLoading ? "Descargando..." : "Descargar PDF"}</span>
+              </button>
+            </>
+          )}
+
+          <div className="mt-2 flex items-center gap-3 px-1 max-lg:justify-center">
+            {avatar}
+            <div className="min-w-0 max-lg:hidden">
+              <p className="truncate text-[15px] font-semibold leading-tight">{userName || "Usuario"}</p>
+              <p className="text-sm text-soft">{isAdmin ? "Administrador" : "Mesero"}</p>
+            </div>
+          </div>
+
+          <button onClick={handleLogout} title="Cerrar sesión" aria-label="Cerrar sesión" className={cn(actionBtn, "hover:text-bad")}>
+            <LogOut size={18} className="shrink-0" />
+            <span className="max-lg:hidden">Cerrar sesión</span>
+          </button>
+        </div>
+      </aside>
+
+      {/* celular */}
+      <nav
+        aria-label="Navegación principal"
+        className="fixed inset-x-0 bottom-0 z-40 flex border-t border-line bg-surface pb-[env(safe-area-inset-bottom)] md:hidden"
+      >
+        {(isAdmin ? nav.filter(n => PHONE_PRIMARY.includes(n.href)) : nav).map(item => {
+          const active = isActive(item.href)
+          const Icon = item.icon
           return (
             <Link
               key={item.href}
               href={item.href}
-              onClick={() => setMobileOpen(false)}
               aria-current={active ? "page" : undefined}
-              style={{
-                display: "flex", alignItems: "center", gap: 10,
-                padding: "9px 12px", borderRadius: 8, textAlign: "left",
-                background: active ? "rgba(249,115,22,0.12)" : "transparent",
-                color:      active ? "#f97316" : "#8b949e",
-                fontWeight: active ? 600 : 500,
-                fontSize: 14,
-                border: active
-                  ? "1px solid rgba(249,115,22,0.18)"
-                  : "1px solid transparent",
-                textDecoration: "none",
-                transition: "all 0.15s",
-              }}
-              onMouseEnter={e => {
-                if (!active) (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.05)"
-              }}
-              onMouseLeave={e => {
-                if (!active) (e.currentTarget as HTMLElement).style.background = "transparent"
-              }}
+              className={cn(
+                "flex min-h-16 flex-1 flex-col items-center justify-center gap-1 text-xs font-semibold transition-colors",
+                active ? "text-brand" : "text-soft"
+              )}
             >
-              <Icon size={16} />
-              {item.label}
+              <Icon size={22} />
+              {item.short}
             </Link>
           )
         })}
-
-        {/* Coming soon — solo admin */}
-        {userRole === "ADMIN" && (
-          <>
-            <div style={{
-              fontSize: 10, fontWeight: 700, color: "#484f58",
-              textTransform: "uppercase", letterSpacing: 1, padding: "16px 10px 8px",
-            }}>
-              Próximamente
-            </div>
-
-            {SOON.map(item => {
-              const Icon = item.icon
-              return (
-                <div key={item.label} style={{
-                  display: "flex", alignItems: "center", gap: 10,
-                  padding: "8px 12px", borderRadius: 8, color: "#484f58",
-                  fontSize: 13, cursor: "default",
-                }}>
-                  <Icon size={15} />
-                  {item.label}
-                  <span style={{
-                    marginLeft: "auto", fontSize: 10,
-                    background: "rgba(255,255,255,0.08)", color: "#484f58",
-                    padding: "2px 6px", borderRadius: 99,
-                  }}>
-                    Pronto
-                  </span>
-                </div>
-              )
-            })}
-          </>
-        )}
+        <button
+          onClick={isAdmin ? () => setMoreOpen(true) : handleLogout}
+          aria-label={isAdmin ? "Más opciones" : "Cerrar sesión"}
+          className={cn(
+            "flex min-h-16 flex-1 flex-col items-center justify-center gap-1 text-xs font-semibold transition-colors",
+            isAdmin && pathname.startsWith("/employees") ? "text-brand" : "text-soft"
+          )}
+        >
+          {isAdmin ? <Ellipsis size={22} /> : <LogOut size={22} />}
+          {isAdmin ? "Más" : "Salir"}
+        </button>
       </nav>
 
-      {/* Acciones admin (Cerrar día + PDF) */}
-      {userRole === "ADMIN" && (
-        <div style={{ padding: "10px", borderTop: "1px solid rgba(255,255,255,0.08)", display: "flex", flexDirection: "column", gap: 2 }}>
-          {[
-            {
-              icon: Moon, label: "Cerrar día",
-              color: "#fbbf24", mut: "rgba(251,191,36,0.13)",
-              action: () => setShowCloseModal(true), loading: false,
-            },
-            {
-              icon: FileDown, label: pdfLoading ? "Descargando..." : "Descargar PDF",
-              color: "#22c55e", mut: "rgba(34,197,94,0.13)",
-              action: () => setShowPdfConfirm(true), loading: pdfLoading,
-            },
-          ].map(a => {
-            const Icon = a.loading ? Loader2 : a.icon
-            return (
-              <button key={a.label} onClick={a.action} disabled={a.loading}
-                aria-label={a.label}
-                style={{
-                  display: "flex", alignItems: "center", gap: 9,
-                  padding: "9px 12px", borderRadius: 8,
-                  color: a.color, fontWeight: 500, fontSize: 13,
-                  background: "transparent", cursor: a.loading ? "wait" : "pointer",
-                  border: "none", width: "100%", transition: "background 0.15s",
-                  opacity: a.loading ? 0.7 : 1,
-                }}
-                onMouseEnter={e => (e.currentTarget.style.background = a.mut)}
-                onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
-              >
-                <Icon size={15} className={a.loading ? "animate-spin" : ""} />
-                {a.label}
-              </button>
-            )
-          })}
+      <Modal open={moreOpen} onClose={() => setMoreOpen(false)} title={userName || "Cuenta"} subtitle="Administrador" size="sm">
+        <div className="flex flex-col gap-1 px-3 pb-4">
+          <Link
+            href="/employees"
+            onClick={() => setMoreOpen(false)}
+            className="flex h-12 items-center gap-3 rounded-md px-3 text-base font-semibold hover:bg-surface-2"
+          >
+            <Users size={20} className="text-soft" /> Empleados
+          </Link>
+          <button
+            onClick={() => { setMoreOpen(false); openClose() }}
+            className="flex h-12 items-center gap-3 rounded-md px-3 text-left text-base font-semibold text-hot hover:bg-surface-2"
+          >
+            <Moon size={20} /> Cerrar día
+          </button>
+          <button
+            onClick={() => { setMoreOpen(false); window.dispatchEvent(new Event(OPEN_PRINTER_EVENT)) }}
+            className="flex h-12 items-center gap-3 rounded-md px-3 text-left text-base font-semibold hover:bg-surface-2"
+          >
+            <Printer size={20} className="text-soft" /> Impresora
+          </button>
+          <button
+            onClick={() => { setMoreOpen(false); openPdf() }}
+            className="flex h-12 items-center gap-3 rounded-md px-3 text-left text-base font-semibold hover:bg-surface-2"
+          >
+            <FileDown size={20} className="text-soft" /> Descargar PDF
+          </button>
+          <button
+            onClick={handleLogout}
+            className="flex h-12 items-center gap-3 rounded-md px-3 text-left text-base font-semibold text-bad hover:bg-surface-2"
+          >
+            <LogOut size={20} /> Cerrar sesión
+          </button>
         </div>
-      )}
+      </Modal>
 
-      {/* Usuario + Logout */}
-      <div style={{ padding: "12px 14px", borderTop: "1px solid rgba(255,255,255,0.08)" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
-          <div style={{
-            width: 32, height: 32, borderRadius: "50%",
-            background: userRole === "ADMIN" ? "rgba(249,115,22,0.2)" : "rgba(96,165,250,0.2)",
-            border: `1px solid ${userRole === "ADMIN" ? "rgba(249,115,22,0.4)" : "rgba(96,165,250,0.4)"}`,
-            display: "flex", alignItems: "center", justifyContent: "center",
-            fontSize: 14, fontWeight: 700,
-            color: userRole === "ADMIN" ? "#f97316" : "#60a5fa",
-            flexShrink: 0,
-          }}>
-            {userName.charAt(0).toUpperCase() || "?"}
-          </div>
-          <div style={{ minWidth: 0 }}>
-            <div style={{ fontSize: 13, fontWeight: 600, color: "#e6edf3", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-              {userName || "Usuario"}
-            </div>
-            <div style={{
-              fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.5,
-              color: userRole === "ADMIN" ? "#f97316" : "#60a5fa",
-            }}>
-              {userRole === "ADMIN" ? "Administrador" : "Empleado"}
-            </div>
-          </div>
-        </div>
-
-        <button
-          onClick={handleLogout}
-          aria-label="Cerrar sesión"
-          style={{
-            display: "flex", alignItems: "center", gap: 9,
-            padding: "8px 12px", borderRadius: 8, color: "#8b949e",
-            fontWeight: 500, fontSize: 13, background: "transparent",
-            cursor: "pointer", border: "none", width: "100%",
-            transition: "color 0.15s",
-          }}
-          onMouseEnter={e => (e.currentTarget.style.color = "#f87171")}
-          onMouseLeave={e => (e.currentTarget.style.color = "#8b949e")}
-        >
-          <LogOut size={15} />
-          Cerrar sesión
-        </button>
-      </div>
-    </aside>
-  )
-
-  return (
-    <>
-      {/* ── Botón hamburger — solo mobile ─────────────────────── */}
-      <button
-        className="md:hidden flex items-center justify-center"
-        onClick={() => setMobileOpen(true)}
-        aria-label="Abrir menú"
-        style={{
-          position: "fixed", top: 14, left: 14, zIndex: 200,
-          width: 38, height: 38, borderRadius: 9,
-          background: "#161b22", border: "1px solid rgba(255,255,255,0.12)",
-          color: "#e6edf3", cursor: "pointer",
-        }}
-      >
-        <Menu size={18} />
-      </button>
-
-      {/* ── Sidebar desktop ────────────────────────────────────── */}
-      <div className="hidden md:block">
-        {sidebarContent}
-      </div>
-
-      {/* ── Sidebar mobile (drawer) ────────────────────────────── */}
-      {mobileOpen && (
-        <div className="md:hidden" style={{ position: "fixed", inset: 0, zIndex: 150 }}>
-          {/* Backdrop */}
-          <div
-            style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.6)" }}
-            onClick={() => setMobileOpen(false)}
-            aria-hidden="true"
-          />
-          {/* Panel */}
-          <div style={{ position: "relative", height: "100%", display: "inline-flex" }}>
-            {sidebarContent}
-            <button
-              onClick={() => setMobileOpen(false)}
-              aria-label="Cerrar menú"
-              style={{
-                position: "absolute", top: 14, right: -44,
-                width: 36, height: 36, borderRadius: 8,
-                background: "#161b22", border: "1px solid rgba(255,255,255,0.12)",
-                color: "#e6edf3", display: "flex", alignItems: "center", justifyContent: "center",
-                cursor: "pointer",
-              }}
-            >
-              <X size={18} />
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* ── Modal Cerrar Día ───────────────────────────────────── */}
-      {showCloseModal && (
-        <div style={{
-          position: "fixed", inset: 0, zIndex: 300,
-          background: "rgba(0,0,0,0.6)",
-          display: "flex", alignItems: "center", justifyContent: "center",
-          padding: 20,
-        }}>
-          <div className="scale-in" style={{
-            background: "#161b22",
-            border: "1px solid rgba(255,255,255,0.08)",
-            borderRadius: 16, width: "100%", maxWidth: 440,
-            overflow: "hidden",
-          }}>
-            <div style={{
-              padding: "18px 20px",
-              borderBottom: "1px solid rgba(255,255,255,0.08)",
-              display: "flex", alignItems: "center", justifyContent: "space-between",
-            }}>
-              <div style={{ fontWeight: 700, fontSize: 16, color: "#e6edf3" }}>Cerrar día</div>
-              {closeState !== "loading" && (
-                <button onClick={handleCloseModalDismiss} aria-label="Cerrar" style={{ color: "#8b949e", cursor: "pointer", border: "none", background: "none" }}>
-                  <X size={20} />
-                </button>
-              )}
-            </div>
-
-            <div style={{ padding: 24 }}>
-              {closeState === "idle" && (
-                <>
-                  <p style={{ color: "#8b949e", fontSize: 14, lineHeight: 1.6, marginBottom: 20 }}>
-                    Esta acción archivará todas las órdenes cerradas del día y generará el resumen diario.{" "}
-                    <span style={{ color: "#f87171", fontWeight: 600 }}>No se puede deshacer.</span>
-                  </p>
-                  <div style={{
-                    background: "rgba(251,191,36,0.08)",
-                    border: "1px solid rgba(251,191,36,0.2)",
-                    borderRadius: 10, padding: "12px 14px",
-                    fontSize: 13, color: "#fbbf24", marginBottom: 20,
-                  }}>
-                    Asegúrate de haber cerrado todas las cuentas antes de continuar.
-                  </div>
-                  <div style={{ display: "flex", gap: 10 }}>
-                    <button onClick={handleCloseModalDismiss} style={{
-                      flex: 1, padding: "11px 16px", borderRadius: 9,
-                      background: "rgba(255,255,255,0.05)",
-                      border: "1px solid rgba(255,255,255,0.08)",
-                      color: "#8b949e", fontWeight: 600, fontSize: 14, cursor: "pointer",
-                    }}>
-                      Cancelar
-                    </button>
-                    <button onClick={handleCloseDay} style={{
-                      flex: 1, padding: "11px 16px", borderRadius: 9,
-                      background: "rgba(251,191,36,0.15)",
-                      border: "1px solid rgba(251,191,36,0.3)",
-                      color: "#fbbf24", fontWeight: 600, fontSize: 14, cursor: "pointer",
-                    }}>
-                      Sí, cerrar día
-                    </button>
-                  </div>
-                </>
-              )}
-
-              {closeState === "loading" && (
-                <div style={{ textAlign: "center", padding: "20px 0" }}>
-                  <Loader2 size={36} color="#fbbf24" className="animate-spin" style={{ margin: "0 auto 14px" }} />
-                  <p style={{ color: "#8b949e", fontSize: 14 }}>Cerrando el día...</p>
-                </div>
-              )}
-
-              {closeState === "success" && (
-                <div style={{ textAlign: "center", padding: "10px 0 6px" }}>
-                  <CheckCircle size={40} color="#22c55e" style={{ margin: "0 auto 14px" }} />
-                  <p style={{ color: "#22c55e", fontWeight: 700, fontSize: 16, marginBottom: 8 }}>
-                    ¡Día cerrado exitosamente!
-                  </p>
-                  <p style={{ color: "#8b949e", fontSize: 13, marginBottom: 20 }}>{closeMsg}</p>
-                  <button onClick={handleCloseModalDismiss} style={{
-                    width: "100%", padding: "11px 16px", borderRadius: 9,
-                    background: "rgba(34,197,94,0.13)",
-                    border: "1px solid rgba(34,197,94,0.2)",
-                    color: "#22c55e", fontWeight: 600, fontSize: 14, cursor: "pointer",
-                  }}>
-                    Entendido
-                  </button>
-                </div>
-              )}
-
-              {closeState === "error" && (
-                <div style={{ textAlign: "center", padding: "10px 0 6px" }}>
-                  <div style={{
-                    width: 40, height: 40, borderRadius: "50%",
-                    background: "rgba(248,113,113,0.13)",
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                    margin: "0 auto 14px", fontSize: 22, color: "#f87171",
-                  }}>✕</div>
-                  <p style={{ color: "#f87171", fontWeight: 700, fontSize: 15, marginBottom: 8 }}>
-                    No se pudo cerrar el día
-                  </p>
-                  <p style={{ color: "#8b949e", fontSize: 13, marginBottom: 20 }}>{closeMsg}</p>
-                  <div style={{ display: "flex", gap: 10 }}>
-                    <button onClick={handleCloseModalDismiss} style={{
-                      flex: 1, padding: "10px", borderRadius: 9,
-                      background: "rgba(255,255,255,0.05)",
-                      border: "1px solid rgba(255,255,255,0.08)",
-                      color: "#8b949e", fontWeight: 600, fontSize: 14, cursor: "pointer",
-                    }}>
-                      Cancelar
-                    </button>
-                    <button onClick={handleCloseDay} style={{
-                      flex: 1, padding: "10px", borderRadius: 9,
-                      background: "rgba(248,113,113,0.13)",
-                      border: "1px solid rgba(248,113,113,0.2)",
-                      color: "#f87171", fontWeight: 600, fontSize: 14, cursor: "pointer",
-                    }}>
-                      Reintentar
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── Modal confirmación Descargar PDF ──────────────────── */}
-      {showPdfConfirm && (
-        <div style={{
-          position: "fixed", inset: 0, zIndex: 300,
-          background: "rgba(0,0,0,0.6)",
-          display: "flex", alignItems: "center", justifyContent: "center",
-          padding: 20,
-        }}>
-          <div className="scale-in" style={{
-            background: "#161b22",
-            border: "1px solid rgba(255,255,255,0.08)",
-            borderRadius: 16, width: "100%", maxWidth: 420,
-            overflow: "hidden",
-          }}>
-            <div style={{
-              padding: "18px 20px",
-              borderBottom: "1px solid rgba(255,255,255,0.08)",
-              display: "flex", alignItems: "center", justifyContent: "space-between",
-            }}>
-              <div style={{ fontWeight: 700, fontSize: 16, color: "#e6edf3" }}>Descargar reporte PDF</div>
-              <button onClick={() => setShowPdfConfirm(false)} aria-label="Cancelar" style={{ color: "#8b949e", cursor: "pointer", border: "none", background: "none" }}>
-                <X size={20} />
-              </button>
-            </div>
-            <div style={{ padding: 24 }}>
-              <p style={{ color: "#8b949e", fontSize: 14, lineHeight: 1.6, marginBottom: 16 }}>
-                Se descargará el reporte semanal en PDF.
-              </p>
-              <div style={{
-                background: "rgba(248,113,113,0.08)",
-                border: "1px solid rgba(248,113,113,0.22)",
-                borderRadius: 10, padding: "12px 14px",
-                fontSize: 13, color: "#f87171", marginBottom: 20,
-              }}>
-                Esta acción eliminará el historial de cierres del servidor. Asegúrate de querer hacerlo.
-              </div>
-              <div style={{ display: "flex", gap: 10 }}>
-                <button onClick={() => setShowPdfConfirm(false)} style={{
-                  flex: 1, padding: "11px 16px", borderRadius: 9,
-                  background: "rgba(255,255,255,0.05)",
-                  border: "1px solid rgba(255,255,255,0.08)",
-                  color: "#8b949e", fontWeight: 600, fontSize: 14, cursor: "pointer",
-                }}>
-                  Cancelar
-                </button>
-                <button onClick={handleDownloadPdfConfirmed} style={{
-                  flex: 1, padding: "11px 16px", borderRadius: 9,
-                  background: "rgba(34,197,94,0.15)",
-                  border: "1px solid rgba(34,197,94,0.3)",
-                  color: "#22c55e", fontWeight: 600, fontSize: 14, cursor: "pointer",
-                }}>
-                  Sí, descargar
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      {modals}
     </>
   )
 }

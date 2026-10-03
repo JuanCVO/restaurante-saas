@@ -1,126 +1,130 @@
 "use client"
-import { useRouter } from "next/navigation"
-import api from "@/lib/axios"
-import { setSession } from "@/lib/auth"
+
 import { useState } from "react"
+import { useRouter } from "next/navigation"
+import Image from "next/image"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Eye, EyeOff } from "lucide-react"
-import Image from "next/image"
+
+import api from "@/lib/axios"
+import { setSession } from "@/lib/auth"
+import { apiMessage } from "@/lib/errors"
+import { Button } from "@/components/ui/button"
+import { Field, Input } from "@/components/ui/input"
 
 const loginSchema = z.object({
-  email: z.string().email("Email inválido"),
-  password: z.string().min(6, "Mínimo 6 caracteres"),
+  email: z.string().email("Escribe un correo válido"),
+  password: z.string().min(1, "Escribe tu contraseña"),
 })
 
 type LoginForm = z.infer<typeof loginSchema>
 
 export default function LoginPage() {
+  const router = useRouter()
   const [showPassword, setShowPassword] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
+  const [serverError, setServerError] = useState("")
 
   const { register, handleSubmit, formState: { errors } } = useForm<LoginForm>({
     resolver: zodResolver(loginSchema),
   })
 
- const router = useRouter()
-
-    const onSubmit = async (data: LoginForm) => {
+  const onSubmit = async (data: LoginForm) => {
     setIsLoading(true)
+    setServerError("")
     try {
-        const response = await api.post("/auth/login", data)
-        const { token, user } = response.data
+      const response = await api.post("/auth/login", data)
+      const { token, user } = response.data
 
-        setSession(token, {
-          id:             user.id,
-          name:           user.name,
-          email:          user.email,
-          role:           user.role,
-          restaurantId:   user.restaurantId,
-          restaurantName: user.restaurantName,
-        })
+      setSession(token, {
+        id:             user.id,
+        name:           user.name,
+        email:          user.email,
+        role:           user.role,
+        restaurantId:   user.restaurantId,
+        restaurantName: user.restaurantName,
+      })
 
-        router.push(user.role === "EMPLOYEE" ? "/tables" : "/dashboard")
-    } catch (error: any) {
-        const message = error.response?.data?.message || "Error al iniciar sesión"
-        alert(message)
+      router.push(user.role === "EMPLOYEE" ? "/tables" : "/dashboard")
+    } catch (error) {
+      setServerError(apiMessage(error, "No se pudo iniciar sesión. Intenta de nuevo."))
     } finally {
-        setIsLoading(false)
+      setIsLoading(false)
     }
-    }
+  }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center p-4">
-      <div className="w-full max-w-md space-y-6">
-
-        <div className="flex flex-col items-center gap-2">
-          <Image
-            src="/LogoRestaurantOS.png"
-            alt="RestaurantOS"
-            width={800}
-            height={800}
-            className="object-contain w-auto h-auto"
-            priority
-          />
-          <p className="text-slate-400 text-sm">Gestiona tu restaurante fácilmente</p>
+    <div className="flex min-h-dvh items-center justify-center bg-canvas px-4 py-10">
+      <div className="w-full max-w-md">
+        <div className="mb-8 flex flex-col items-center gap-3 text-center">
+          <div className="rounded-xl bg-plate px-5 py-3">
+            <Image
+              src="/LogoRestaurantOS.png"
+              alt="RestaurantOS"
+              width={581}
+              height={152}
+              className="h-14 w-auto"
+              priority
+            />
+          </div>
+          <p className="text-soft">Gestiona tu restaurante fácilmente</p>
         </div>
 
-        <Card className="border-slate-700 bg-slate-800/50 backdrop-blur">
-          <CardHeader>
-            <CardTitle className="text-white">Iniciar sesión</CardTitle>
-            <CardDescription className="text-slate-400">
-              Ingresa tus credenciales para continuar
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+        <form
+          onSubmit={handleSubmit(onSubmit)}
+          noValidate
+          className="flex flex-col gap-5 rounded-xl bg-surface p-6 sm:p-8"
+        >
+          <div>
+            <h1 className="font-display text-2xl font-bold">Iniciar sesión</h1>
+            <p className="mt-1 text-soft">Entra con tu correo y contraseña.</p>
+          </div>
 
-              <div className="space-y-2">
-                <Label className="text-slate-300">Email</Label>
-                <Input
-                  placeholder="ejemplo@restaurante.com"
-                  className="bg-slate-700 border-slate-600 text-white placeholder:text-slate-500"
-                  {...register("email")}
-                />
-                {errors.email && <p className="text-red-400 text-sm">{errors.email.message}</p>}
-              </div>
+          <Field label="Correo" error={errors.email?.message}>
+            <Input
+              type="email"
+              inputMode="email"
+              autoComplete="username"
+              autoCapitalize="none"
+              placeholder="ejemplo@restaurante.com"
+              aria-invalid={!!errors.email}
+              {...register("email")}
+            />
+          </Field>
 
-              <div className="space-y-2">
-                <Label className="text-slate-300">Contraseña</Label>
-                <div className="relative">
-                  <Input
-                    type={showPassword ? "text" : "password"}
-                    placeholder="••••••••"
-                    className="bg-slate-700 border-slate-600 text-white placeholder:text-slate-500 pr-10"
-                    {...register("password")}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200"
-                  >
-                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </button>
-                </div>
-                {errors.password && <p className="text-red-400 text-sm">{errors.password.message}</p>}
-              </div>
-
-              <Button
-                type="submit"
-                className="w-full bg-orange-500 hover:bg-orange-600 text-white font-semibold"
-                disabled={isLoading}
+          <Field label="Contraseña" error={errors.password?.message}>
+            <div className="relative">
+              <Input
+                type={showPassword ? "text" : "password"}
+                autoComplete="current-password"
+                placeholder="••••••••"
+                className="pr-12"
+                aria-invalid={!!errors.password}
+                {...register("password")}
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword(s => !s)}
+                aria-label={showPassword ? "Ocultar contraseña" : "Mostrar contraseña"}
+                className="absolute right-1 top-1/2 grid size-10 -translate-y-1/2 place-items-center rounded-md text-soft hover:text-ink"
               >
-                {isLoading ? "Ingresando..." : "Ingresar"}
-              </Button>
+                {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+              </button>
+            </div>
+          </Field>
 
-            </form>
-          </CardContent>
-        </Card>
+          {serverError && (
+            <p role="alert" className="rounded-md bg-bad/10 px-3 py-2.5 text-[15px] text-bad">
+              {serverError}
+            </p>
+          )}
+
+          <Button type="submit" size="lg" loading={isLoading} className="w-full">
+            {isLoading ? "Ingresando..." : "Ingresar"}
+          </Button>
+        </form>
       </div>
     </div>
   )

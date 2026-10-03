@@ -2,18 +2,37 @@ import * as React from "react"
 
 import { cn } from "@/lib/utils"
 
+// 16px para que el celular no haga zoom al escribir
+export const fieldClass =
+  "h-11 w-full min-w-0 rounded-md border border-white/15 bg-canvas px-3 text-base text-ink placeholder:text-faint transition-colors focus-visible:border-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40 disabled:cursor-not-allowed disabled:opacity-50 aria-[invalid=true]:border-bad"
+
 function Input({ className, type, ...props }: React.ComponentProps<"input">) {
+  return <input type={type} className={cn(fieldClass, className)} {...props} />
+}
+
+function Select({ className, children, ...props }: React.ComponentProps<"select">) {
   return (
-    <input
-      type={type}
-      data-slot="input"
-      className={cn(
-        "h-8 w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 py-1 text-base transition-colors outline-none file:inline-flex file:h-6 file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-input/50 disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 md:text-sm dark:bg-input/30 dark:disabled:bg-input/80 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40",
-        className
-      )}
-      {...props}
-    />
+    <select className={cn(fieldClass, "pr-8", className)} {...props}>
+      {children}
+    </select>
   )
 }
 
-export { Input }
+// la etiqueta envuelve al campo: queda asociada sin necesidad de ids
+function Field({
+  label, hint, error, className, children,
+}: { label: string; hint?: string; error?: string; className?: string; children: React.ReactNode }) {
+  return (
+    <label className={cn("flex flex-col gap-1.5", className)}>
+      <span className="text-sm font-semibold text-soft">{label}</span>
+      {children}
+      {error ? (
+        <span className="text-sm text-bad">{error}</span>
+      ) : hint ? (
+        <span className="text-sm text-faint">{hint}</span>
+      ) : null}
+    </label>
+  )
+}
+
+export { Input, Select, Field }

@@ -12,7 +12,7 @@ const tableOwner = ownsResource((id) =>
 
 router.get("/:restaurantId", authMiddleware, sameRestaurant, getTables)
 router.post("/", authMiddleware, adminOnly, sameRestaurant, createTable)
-router.patch("/:id/status", authMiddleware, tableOwner, updateTableStatus)
+router.patch("/:id/status", authMiddleware, adminOnly, tableOwner, updateTableStatus)
 router.delete("/:id", authMiddleware, adminOnly, tableOwner, deleteTable)
 
 export default router

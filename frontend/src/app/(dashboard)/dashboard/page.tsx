@@ -1,443 +1,379 @@
 "use client"
 
-import { useEffect, useState } from "react"
-import { ShoppingBag, Users, UtensilsCrossed, TrendingUp, Trash2 } from "lucide-react"
+import { useCallback, useEffect, useMemo, useState } from "react"
+import { Moon, Trash2 } from "lucide-react"
+
 import api from "@/lib/axios"
-import { useCurrentUser, authHeaders } from "@/lib/auth"
+import { useCurrentUser } from "@/lib/auth"
+import { apiMessage } from "@/lib/errors"
+import { cop, copMinus, shortDate, timeOfDay } from "@/lib/format"
+import { cn } from "@/lib/utils"
+import type {
+  CashMovement, DailySummary, DashboardStats, EmployeePayment, Order, SummaryChart,
+} from "@/types/api"
 import TopBar from "@/components/ui/layout/TopBar"
-import StatCard from "@/components/ui/layout/StatCard"
-import type { DashboardStats, Order, SummaryChart, DailySummary } from "@/types/api"
+import { OPEN_CLOSE_DAY_EVENT } from "@/components/ui/layout/DayActions"
+import BarChart from "@/components/ui/BarChart"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
+import { useToast } from "@/components/ui/toast"
 
-type Stats = DashboardStats
-type SummaryHistory = Pick<
-  DailySummary,
-  "id" | "date" | "totalOrdenes" | "totalPlatos" | "totalPropinas" | "totalGastos" | "totalIngresos"
->
+type Metric = "ventas" | "neto" | "pedidos"
+type Period = "week" | "month"
 
-const PAY_COLORS: Record<string, string> = {
-  Efectivo: "#22c55e",
-  Datafono: "#fbbf24",
-  Nequi:    "#60a5fa",
+const PAY_TONE = { Efectivo: "good", Datafono: "warn", Nequi: "brand" } as const
+
+const METRICS: { value: Metric; label: string }[] = [
+  { value: "ventas", label: "Ventas" },
+  { value: "neto", label: "Neto" },
+  { value: "pedidos", label: "Pedidos" },
+]
+
+// $1,5 M, $800 mil: rótulos cortos para el eje
+const compactMoney = (v: number) => {
+  if (v >= 1_000_000) return `$${(v / 1_000_000).toFixed(v % 1_000_000 === 0 ? 0 : 1).replace(".", ",")} M`
+  if (v >= 1_000) return `$${Math.round(v / 1_000)} mil`
+  return `$${v}`
 }
 
-function BarChart({ data, metric }: { data: SummaryChart[]; metric: "ingresos" | "pedidos" }) {
-  const [hov, setHov] = useState<number | null>(null)
+const sum = <T,>(items: T[], pick: (item: T) => number) => items.reduce((s, i) => s + pick(i), 0)
 
-  const vals = data.map(d => d[metric])
-  const max  = Math.max(...vals, 1)
+export default function DashboardPage() {
+  const toast = useToast()
+  const { user, token, restaurantId } = useCurrentUser()
+  const restaurantName = user?.restaurantName ?? ""
 
-  const fmt = (v: number) =>
-    metric === "ingresos"
-      ? v >= 1_000_000 ? `$${(v / 1_000_000).toFixed(1)}M` : `$${(v / 1_000).toFixed(0)}k`
-      : `${v}`
+  const [stats, setStats] = useState<DashboardStats | null>(null)
+  const [history, setHistory] = useState<Order[]>([])
+  const [summaries, setSummaries] = useState<DailySummary[]>([])
+  const [movements, setMovements] = useState<CashMovement[]>([])
+  const [payments, setPayments] = useState<EmployeePayment[]>([])
+  const [chartData, setChartData] = useState<SummaryChart[]>([])
+  const [loaded, setLoaded] = useState(false)
+
+  const [period, setPeriod] = useState<Period>("week")
+  const [metric, setMetric] = useState<Metric>("ventas")
+  const [reloadKey, setReloadKey] = useState(0)
+
+  const [deleteTarget, setDeleteTarget] = useState<DailySummary | null>(null)
+  const [deleting, setDeleting] = useState(false)
+
+  useEffect(() => {
+    const onDayClosed = () => {
+      setHistory([])
+      setStats(null)
+      setReloadKey(k => k + 1)
+    }
+    window.addEventListener("day-closed", onDayClosed)
+    return () => window.removeEventListener("day-closed", onDayClosed)
+  }, [])
+
+  const loadToday = useCallback(async () => {
+    if (!restaurantId) return
+    const results = await Promise.allSettled([
+      api.get(`orders/stats/${restaurantId}`),
+      api.get(`orders/history/${restaurantId}`),
+      api.get(`daily-summary/history/${restaurantId}`),
+      api.get(`cash-movements/${restaurantId}`),
+      api.get(`employee-payments/${restaurantId}`),
+    ])
+    const [s, h, sm, mv, pay] = results
+    if (s.status === "fulfilled") setStats(s.value.data)
+    if (h.status === "fulfilled") setHistory(h.value.data)
+    if (sm.status === "fulfilled") setSummaries(sm.value.data)
+    if (mv.status === "fulfilled") setMovements(mv.value.data)
+    if (pay.status === "fulfilled") setPayments(pay.value.data)
+    const failed = results.find(r => r.status === "rejected") as PromiseRejectedResult | undefined
+    if (failed) toast.error(apiMessage(failed.reason, "No se pudieron cargar algunos datos del dashboard."))
+    setLoaded(true)
+  }, [restaurantId, toast])
+
+  useEffect(() => {
+    if (!restaurantId || !token) return
+    loadToday()
+  }, [restaurantId, token, reloadKey, loadToday])
+
+  // se actualiza solo cada 30 s mientras la pestaña está a la vista
+  useEffect(() => {
+    if (!restaurantId || !token) return
+    const id = window.setInterval(() => {
+      if (document.visibilityState === "visible") loadToday()
+    }, 30_000)
+    return () => window.clearInterval(id)
+  }, [restaurantId, token, loadToday])
+
+  useEffect(() => {
+    if (!restaurantId || !token) return
+    api.get(`daily-summary/chart/${restaurantId}?period=${period}`)
+      .then(r => setChartData(r.data))
+      .catch(() => setChartData([]))
+  }, [restaurantId, token, period, reloadKey])
+
+  // "hoy" es desde el último cierre y no el día del calendario; si no, una venta de las 11:58 p. m. se pierde a medianoche
+  const periodStart = stats ? new Date(stats.periodStart).getTime() : Infinity
+  const afterClose = (createdAt: string) => new Date(createdAt).getTime() > periodStart
+  const lastCloseAt = stats?.lastCloseAt ?? null
+  const justClosed = lastCloseAt !== null && Date.now() - new Date(lastCloseAt).getTime() < 12 * 60 * 60 * 1000
+
+  const ventas = stats?.totalIngresos ?? 0
+  const pedidos = stats?.totalPedidos ?? 0
+  const platos = stats?.totalPlatos ?? 0
+  const propinasCobradas = stats?.totalPropinas ?? 0
+
+  const todayMovements = movements.filter(m => afterClose(m.createdAt))
+  const movementTotal = (type: CashMovement["type"]) =>
+    sum(todayMovements.filter(m => m.type === type), m => m.amount)
+  const base = movementTotal("BASE_CAJA")
+  const gastos = movementTotal("GASTO")
+  const compras = movementTotal("COMPRA")
+  const sueldos = sum(payments.filter(p => afterClose(p.createdAt)), p => p.salary)
+
+  const neto = ventas + base - gastos - compras - sueldos
+
+  const bars = useMemo(() => chartData.map(d => {
+    const [, month, day] = d.date.slice(0, 10).split("-")
+    const value = metric === "ventas" ? d.efectivo + d.datafono + d.nequi : metric === "neto" ? d.ingresos : d.pedidos
+    return { label: `${day}/${month}`, value }
+  }), [chartData, metric])
+
+  const confirmDeleteSummary = async () => {
+    if (!deleteTarget) return
+    setDeleting(true)
+    try {
+      await api.delete(`daily-summary/entry/${deleteTarget.id}`)
+      setSummaries(prev => prev.filter(s => s.id !== deleteTarget.id))
+      setReloadKey(k => k + 1)
+      toast.success("Cierre eliminado del historial.")
+    } catch (err) {
+      toast.error(apiMessage(err, "No se pudo eliminar el cierre."))
+    } finally {
+      setDeleting(false)
+      setDeleteTarget(null)
+    }
+  }
+
+  const tabBtn = (active: boolean) => cn(
+    "h-9 rounded-md px-3 text-sm font-semibold transition-colors",
+    active ? "bg-brand text-brand-ink" : "text-soft hover:text-ink"
+  )
 
   return (
-    <div className="w-full pb-1">
-      {/* Bars area */}
-      <div className="relative h-[180px]">
-        {/* Gridlines */}
-        {[0.25, 0.5, 0.75, 1].map(t => (
-          <div
-            key={t}
-            className="absolute left-0 right-0 h-px pointer-events-none"
-            style={{ bottom: `${t * 100}%`, background: "rgba(255,255,255,0.05)" }}
-          />
-        ))}
+    <div className="flex min-h-0 flex-1 flex-col">
+      <TopBar title="Dashboard">
+        <Button variant="hot" onClick={() => window.dispatchEvent(new Event(OPEN_CLOSE_DAY_EVENT))}>
+          <Moon size={17} /> <span className="max-sm:hidden">Cerrar el día</span><span className="sm:hidden">Cerrar</span>
+        </Button>
+      </TopBar>
 
-        {/* Bars */}
-        <div className="absolute inset-0 flex items-end gap-1.5 px-1">
-          {data.map((_d, i) => {
-            const val    = vals[i]
-            const pct    = (val / max) * 100
-            const isHov  = hov === i
-            const isLast = i === data.length - 1
-            const fill   = isLast ? "#f97316" : isHov ? "#60a5fa" : "rgba(249,115,22,0.38)"
+      <div className="flex-1 overflow-y-auto px-4 pb-10 pt-2 md:px-7">
+        <section className="mb-6">
+          <p className="text-soft">
+            Resumen de hoy en{" "}
+            <span suppressHydrationWarning className="font-semibold text-ink">{restaurantName || "tu restaurante"}</span>
+          </p>
+          <p className="mt-1 font-display text-[clamp(1.6rem,4.5vw,2.4rem)] font-medium leading-tight">
+            {ventas > 0 ? (
+              <>Van <strong className="font-extrabold text-brand tnum">{cop(ventas)}</strong> en ventas hoy</>
+            ) : loaded ? (
+              <>{justClosed ? "Día cerrado, empezamos de cero" : "Todavía no hay ventas hoy"}</>
+            ) : (
+              <span className="text-faint">Cargando el día...</span>
+            )}
+          </p>
+          <p className="mt-1.5 text-soft">
+            {pedidos} {pedidos === 1 ? "orden cerrada" : "órdenes cerradas"}, {platos} {platos === 1 ? "plato" : "platos"}
+            {stats ? ` y ${stats.mesasOcupadas} de ${stats.totalMesas} mesas ocupadas.` : "."}
+          </p>
+          {justClosed && lastCloseAt && (
+            <p className="mt-1 text-sm text-good">
+              El día se cerró a las {timeOfDay(lastCloseAt)} y quedó guardado en el historial. Lo que entre ahora cuenta para el siguiente cierre.
+            </p>
+          )}
+        </section>
 
-            return (
-              <div
-                key={i}
-                className="flex-1 h-full flex flex-col justify-end items-center relative cursor-default"
-                onMouseEnter={() => setHov(i)}
-                onMouseLeave={() => setHov(null)}
-              >
-                {/* Value label */}
-                {val > 0 && (isHov || isLast) && (
-                  <div
-                    className="absolute text-[11px] font-bold whitespace-nowrap px-1.5 py-0.5 rounded-[5px] border border-white/8 z-10"
-                    style={{
-                      bottom: `calc(${pct}% + 8px)`,
-                      color: isLast ? "#f97316" : "#60a5fa",
-                      background: "#161b22",
-                    }}
-                  >
-                    {fmt(val)}
+        <div className="grid gap-5 xl:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)] xl:items-start">
+          <div className="flex min-w-0 flex-col gap-5">
+            <section className="rounded-lg bg-surface px-4 pb-3 pt-4 sm:px-5">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h2 className="font-display text-lg font-bold">Ventas archivadas</h2>
+                  <p className="text-sm text-soft">Un cierre por día. El más reciente va en naranja.</p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <div className="flex gap-1 rounded-lg bg-canvas/60 p-1" role="group" aria-label="Qué mostrar">
+                    {METRICS.map(m => (
+                      <button key={m.value} onClick={() => setMetric(m.value)} aria-pressed={metric === m.value} className={tabBtn(metric === m.value)}>
+                        {m.label}
+                      </button>
+                    ))}
                   </div>
-                )}
-
-                {/* Bar */}
-                <div
-                  className="w-[62%] rounded-t-[5px] rounded-b-[2px] transition-[background] duration-150"
-                  style={{
-                    height: `${Math.max(pct, val > 0 ? 1.5 : 0)}%`,
-                    background: fill,
-                  }}
-                />
+                  <div className="flex gap-1 rounded-lg bg-canvas/60 p-1" role="group" aria-label="Periodo">
+                    {([["week", "7 días"], ["month", "30 días"]] as const).map(([value, label]) => (
+                      <button key={value} onClick={() => setPeriod(value)} aria-pressed={period === value} className={tabBtn(period === value)}>
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </div>
-            )
-          })}
+              <div className="mt-3">
+                {bars.length > 0 ? (
+                  <BarChart
+                    data={bars}
+                    format={metric === "pedidos" ? String : compactMoney}
+                    ariaLabel={`Gráfica de ${METRICS.find(m => m.value === metric)?.label.toLowerCase()} de los últimos ${period === "week" ? "7" : "30"} días`}
+                  />
+                ) : (
+                  <div className="grid h-44 place-items-center text-soft">Aún no hay cierres en este periodo.</div>
+                )}
+              </div>
+            </section>
+
+            <section className="rounded-lg bg-surface px-4 py-4 sm:px-5">
+              <h2 className="font-display text-lg font-bold">Ventas de hoy</h2>
+              <p className="text-sm text-soft">Órdenes cerradas que aún no se archivaron con el cierre del día.</p>
+              {history.length === 0 ? (
+                <p className="py-8 text-center text-soft">No hay ventas cerradas pendientes de archivar.</p>
+              ) : (
+                <ul className="mt-2 max-h-[30rem] overflow-y-auto">
+                  {history.map(order => (
+                    <li key={order.id} className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-0.5 border-t border-line py-3 first:border-0">
+                      <span className="row-span-2 grid size-10 place-items-center rounded-full bg-surface-2 font-display font-bold tnum">
+                        {order.table?.number ?? "–"}
+                      </span>
+                      <span className="truncate font-semibold">
+                        {order.items.map(i => `${i.product.name} ×${i.quantity}`).join(", ")}
+                      </span>
+                      <span className="row-span-2 text-right font-display font-bold tnum">{cop(order.total)}</span>
+                      <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-soft">
+                        {timeOfDay(order.createdAt)}
+                        {order.paymentMethod && (
+                          <Badge tone={PAY_TONE[order.paymentMethod as keyof typeof PAY_TONE] ?? "soft"}>{order.paymentMethod}</Badge>
+                        )}
+                        {order.tip ? <span>propina {cop(order.tip)}</span> : null}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          </div>
+
+          <div className="flex min-w-0 flex-col gap-5">
+            <section className="rounded-lg bg-surface px-4 py-4 sm:px-5">
+              <h2 className="font-display text-lg font-bold">Caja del día</h2>
+              <dl className="mt-2 text-[15px]">
+                <Row label="Ventas" value={cop(ventas)} />
+                <Row label="Base de caja" value={`+ ${cop(base)}`} />
+                <Row label="Gastos" value={copMinus(gastos)} muted />
+                <Row label="Compras" value={copMinus(compras)} muted />
+                <Row label="Sueldos pagados" value={copMinus(sueldos)} muted />
+                <div className="mt-2 flex items-baseline justify-between border-t-2 border-ink/80 pt-3">
+                  <dt className="font-display text-base font-bold">Neto del día</dt>
+                  <dd className={cn("font-display text-2xl font-extrabold tnum", neto < 0 ? "text-bad" : "text-brand")}>{cop(neto)}</dd>
+                </div>
+              </dl>
+            </section>
+
+            <section className="rounded-lg bg-surface-2 px-4 py-4 sm:px-5">
+              <h2 className="font-display text-base font-bold">Propinas de hoy</h2>
+              <p className="text-sm text-soft">Son del personal</p>
+              <p className="mt-2 font-display text-3xl font-extrabold tnum">{cop(propinasCobradas)}</p>
+            </section>
+          </div>
         </div>
+
+        <section className="mt-5 rounded-lg bg-surface px-4 py-4 sm:px-5">
+          <h2 className="font-display text-lg font-bold">Historial de cierres</h2>
+          {summaries.length === 0 ? (
+            <p className="py-8 text-center text-soft">Todavía no hay cierres registrados.</p>
+          ) : (
+            <>
+              {/* tablet y escritorio */}
+              <div className="mt-2 hidden overflow-x-auto md:block">
+                <table className="w-full border-collapse text-[15px]">
+                  <thead>
+                    <tr className="text-left text-sm text-soft">
+                      {["Fecha", "Órdenes", "Platos", "Propinas", "Gastos y compras", "Neto"].map((h, i) => (
+                        <th key={h} className={cn("py-2 pr-4 font-semibold", i >= 1 && "text-right")}>{h}</th>
+                      ))}
+                      <th className="w-12" aria-label="Acciones" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {summaries.map(s => {
+                      const out = (s.totalGastos ?? 0) + (s.totalCompras ?? 0)
+                      return (
+                        <tr key={s.id} className="border-t border-line">
+                          <td className="py-3 pr-4 text-soft">{shortDate(s.date)}</td>
+                          <td className="py-3 pr-4 text-right font-semibold tnum">{s.totalOrdenes}</td>
+                          <td className="py-3 pr-4 text-right text-soft tnum">{s.totalPlatos}</td>
+                          <td className="py-3 pr-4 text-right tnum">{cop(s.totalPropinas)}</td>
+                          <td className="py-3 pr-4 text-right text-soft tnum">{out > 0 ? copMinus(out) : "–"}</td>
+                          <td className="py-3 pr-4 text-right font-display font-bold tnum">{cop(s.totalIngresos)}</td>
+                          <td className="py-1 text-right">
+                            <button
+                              onClick={() => setDeleteTarget(s)}
+                              aria-label={`Eliminar el cierre del ${shortDate(s.date)}`}
+                              className="grid size-10 place-items-center rounded-md text-faint transition-colors hover:bg-bad/15 hover:text-bad"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* celular */}
+              <ul className="mt-2 md:hidden">
+                {summaries.map(s => (
+                  <li key={s.id} className="flex items-center gap-3 border-t border-line py-3 first:border-0">
+                    <div className="min-w-0 flex-1">
+                      <p className="font-semibold">{shortDate(s.date)}</p>
+                      <p className="text-sm text-soft">{s.totalOrdenes} órdenes · {s.totalPlatos} platos</p>
+                    </div>
+                    <span className="font-display font-bold tnum">{cop(s.totalIngresos)}</span>
+                    <button
+                      onClick={() => setDeleteTarget(s)}
+                      aria-label={`Eliminar el cierre del ${shortDate(s.date)}`}
+                      className="grid size-10 place-items-center rounded-md text-faint hover:bg-bad/15 hover:text-bad"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+        </section>
+
+        <p className="mt-8 text-center text-sm text-faint">
+          Sistema desarrollado por <span className="font-semibold text-soft">@JuanCVO</span>
+        </p>
       </div>
 
-      {/* Day labels row */}
-      <div className="flex gap-1.5 px-1 pt-2.5">
-        {data.map((d, i) => {
-          const isLast = i === data.length - 1
-          return (
-            <div
-              key={i}
-              className="flex-1 text-center text-xs select-none"
-              style={{
-                color: isLast ? "#f97316" : "#8b949e",
-                fontWeight: isLast ? 700 : 400,
-              }}
-            >
-              {d.day}
-            </div>
-          )
-        })}
-      </div>
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        title="¿Eliminar este cierre?"
+        message={deleteTarget ? `Se quita del historial el cierre del ${shortDate(deleteTarget.date)}. No se puede deshacer.` : ""}
+        confirmLabel="Sí, eliminar"
+        loading={deleting}
+        onConfirm={confirmDeleteSummary}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   )
 }
 
-export default function DashboardPage() {
-  const [chartData, setChartData]           = useState<SummaryChart[]>([])
-  const [period, setPeriod]                 = useState<"week" | "month">("week")
-  const [metric, setMetric]                 = useState<"ingresos" | "pedidos">("ingresos")
-  const [stats, setStats]                   = useState<Stats | null>(null)
-  const [history, setHistory]               = useState<Order[]>([])
-  const [summaryHistory, setSummaryHistory] = useState<SummaryHistory[]>([])
-  const [baseCaja, setBaseCaja]             = useState(0)
-  const [deletingId, setDeletingId]         = useState<string | null>(null)
-
-  const { user, token, restaurantId } = useCurrentUser()
-  const restaurantName = user?.restaurantName ?? ""
-
-  const handleDeleteSummary = async (id: string) => {
-    if (!confirm("¿Eliminar este cierre del historial?")) return
-    setDeletingId(id)
-    try {
-      await api.delete(`daily-summary/entry/${id}`, { headers: authHeaders() })
-      setSummaryHistory(prev => prev.filter(s => s.id !== id))
-    } finally {
-      setDeletingId(null)
-    }
-  }
-
-  useEffect(() => {
-    const handleDayClosed = () => {
-      setHistory([])
-      setStats(null)
-    }
-    window.addEventListener("day-closed", handleDayClosed)
-    return () => window.removeEventListener("day-closed", handleDayClosed)
-  }, [])
-
-  useEffect(() => {
-    if (!restaurantId || !token) return
-    const headers = authHeaders()
-
-    api.get(`orders/stats/${restaurantId}`, { headers })
-      .then(r => setStats(r.data))
-
-    api.get(`orders/history/${restaurantId}`, { headers })
-      .then(r => setHistory(r.data))
-
-    api.get(`daily-summary/history/${restaurantId}`, { headers })
-      .then(r => setSummaryHistory(r.data))
-
-    api.get(`daily-summary/chart/${restaurantId}?period=${period}`, { headers })
-      .then(r => {
-        const fixedData = r.data.map((item: SummaryChart) => {
-          const [, month, day] = item.date.slice(0, 10).split("-")
-          return { ...item, day: `${day}/${month}` }
-        })
-        setChartData(fixedData)
-      })
-
-    api.get(`/cash-movements/${restaurantId}`, { headers })
-      .then(r => {
-        const today = new Date().toDateString()
-        const todayMovements = r.data.filter(
-          (m: { createdAt: string; type: string }) =>
-            new Date(m.createdAt).toDateString() === today
-        )
-        const base = todayMovements
-          .filter((m: { type: string }) => m.type === "BASE_CAJA")
-          .reduce((s: number, m: { amount: number }) => s + m.amount, 0)
-        setBaseCaja(base)
-      })
-  }, [restaurantId, token, period])
-
+function Row({ label, value, muted, plain }: { label: string; value: string; muted?: boolean; plain?: boolean }) {
   return (
-    <div className="flex flex-col h-screen overflow-hidden">
-      <TopBar title="Dashboard" />
-
-      <div className="flex-1 overflow-y-auto px-7 py-6 flex flex-col gap-6">
-
-        {/* Header */}
-        <div>
-          <h2 className="text-[21px] font-extrabold text-[#e6edf3]">Bienvenidos</h2>
-          <p className="text-sm text-[#8b949e] mt-1">
-            Resumen de hoy en{" "}
-            <span suppressHydrationWarning className="text-orange-500 font-semibold">
-              {restaurantName}
-            </span>
-          </p>
-        </div>
-
-        {/* Stat Cards */}
-        <div className="grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-3.5">
-          <StatCard
-            label="Pedidos hoy"
-            value={stats?.totalPedidos ?? 0}
-            sub="órdenes cerradas"
-            icon={ShoppingBag}
-            color="#f97316"
-            bg="rgba(249,115,22,0.14)"
-            trend={12}
-            delay={0}
-          />
-          <StatCard
-            label="Mesas activas"
-            value={stats ? `${stats.mesasOcupadas}/${stats.totalMesas}` : "–"}
-            sub={`${stats ? stats.totalMesas - stats.mesasOcupadas : 0} disponibles`}
-            icon={Users}
-            color="#60a5fa"
-            bg="rgba(96,165,250,0.13)"
-            trend={5}
-            delay={60}
-          />
-          <StatCard
-            label="Platos vendidos"
-            value={stats?.totalPlatos ?? 0}
-            sub="ítems en órdenes de hoy"
-            icon={UtensilsCrossed}
-            color="#22c55e"
-            bg="rgba(34,197,94,0.13)"
-            trend={8}
-            delay={120}
-          />
-          <StatCard
-            label="Ingresos hoy"
-            value={`$${((stats?.totalIngresos ?? 0) + baseCaja).toLocaleString()}`}
-            sub="ventas + base de caja"
-            icon={TrendingUp}
-            color="#c084fc"
-            bg="rgba(192,132,252,0.13)"
-            trend={21}
-            delay={180}
-          />
-          <StatCard
-            label="Propinas hoy"
-            value={`$${(stats?.totalPropinas ?? 0).toLocaleString()}`}
-            sub="propinas del día"
-            icon={TrendingUp}
-            color="#fbbf24"
-            bg="rgba(251,191,36,0.13)"
-            delay={240}
-          />
-        </div>
-
-        {/* Gráfica */}
-        <div className="bg-[#1c2128] border border-white/8 rounded-xl overflow-hidden">
-          <div className="px-5 py-4 border-b border-white/8 flex items-center justify-between gap-3 flex-wrap">
-            <div>
-              <p className="font-bold text-[15px] text-[#e6edf3]">Ventas archivadas</p>
-              <p className="text-xs text-[#8b949e] mt-0.5">Último día resaltado en naranja</p>
-            </div>
-            <div className="flex gap-1.5 items-center flex-wrap">
-              {(["ingresos", "pedidos"] as const).map(m => (
-                <button
-                  key={m}
-                  onClick={() => setMetric(m)}
-                  className={`px-3.5 py-1.5 rounded-lg text-[13px] font-semibold cursor-pointer transition-all border ${
-                    metric === m
-                      ? "bg-orange-500 text-white border-orange-500"
-                      : "bg-[#161b22] text-[#8b949e] border-white/8"
-                  }`}
-                >
-                  {m === "ingresos" ? "Ingresos" : "Pedidos"}
-                </button>
-              ))}
-              <div className="w-px h-5 bg-white/8" />
-              {(["week", "month"] as const).map(p => (
-                <button
-                  key={p}
-                  onClick={() => setPeriod(p)}
-                  className={`px-3 py-1.5 rounded-lg text-[13px] font-semibold cursor-pointer transition-all border ${
-                    period === p
-                      ? "bg-white/8 text-[#e6edf3] border-white/[0.14]"
-                      : "bg-transparent text-[#8b949e] border-transparent"
-                  }`}
-                >
-                  {p === "week" ? "7d" : "30d"}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className="px-5 pt-4">
-            {chartData.length > 0 ? (
-              <BarChart data={chartData} metric={metric} />
-            ) : (
-              <div className="h-[180px] flex items-center justify-center text-[#484f58] text-sm">
-                Sin datos archivados aún
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Historial de ventas */}
-        <div>
-          <h2 className="text-[#e6edf3] font-bold text-[17px] mb-3.5">Historial de ventas</h2>
-          <div className="bg-[#1c2128] border border-white/8 rounded-xl overflow-hidden">
-            <table className="w-full border-collapse">
-              <thead>
-                <tr className="border-b border-white/8">
-                  {["Orden","Mesa","Productos","Hora","Pago","Propina","Total"].map(h => (
-                    <th key={h} className="text-left px-4 py-2.5 text-[11px] font-bold text-[#484f58] uppercase tracking-[0.6px]">
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {history.map((order, i) => (
-                  <tr
-                    key={order.id}
-                    className="transition-colors duration-100 hover:bg-white/[0.03]"
-                    style={{ borderBottom: i < history.length - 1 ? "1px solid rgba(255,255,255,0.05)" : "none" }}
-                  >
-                    <td className="px-4 py-[11px] font-mono text-xs text-[#8b949e]">
-                      #{order.id.slice(0, 8)}
-                    </td>
-                    <td className="px-4 py-[11px] font-bold text-[#e6edf3] text-sm">
-                      Mesa {order.table?.number ?? "–"}
-                    </td>
-                    <td className="px-4 py-[11px] text-[#8b949e] text-[13px] max-w-[200px] overflow-hidden text-ellipsis whitespace-nowrap">
-                      {order.items.map(i => `${i.product.name} x${i.quantity}`).join(", ")}
-                    </td>
-                    <td className="px-4 py-[11px] text-[#8b949e] text-[13px]">
-                      {new Date(order.createdAt).toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit" })}
-                    </td>
-                    <td className="px-4 py-[11px]">
-                      {order.paymentMethod ? (
-                        <span
-                          className="px-2.5 py-0.5 rounded-full text-xs font-semibold"
-                          style={{
-                            background: `${PAY_COLORS[order.paymentMethod] ?? "#8b949e"}20`,
-                            color: PAY_COLORS[order.paymentMethod] ?? "#8b949e",
-                          }}
-                        >
-                          {order.paymentMethod}
-                        </span>
-                      ) : "–"}
-                    </td>
-                    <td className="px-4 py-[11px] text-[13px] font-semibold">
-                      {order.tip && order.tip > 0
-                        ? <span className="text-amber-400">${order.tip.toLocaleString()}</span>
-                        : <span className="text-[#484f58]">–</span>
-                      }
-                    </td>
-                    <td className="px-4 py-[11px] font-bold text-orange-500 text-sm">
-                      ${order.total.toLocaleString()}
-                    </td>
-                  </tr>
-                ))}
-                {history.length === 0 && (
-                  <tr>
-                    <td colSpan={7} className="py-8 text-center text-[#484f58] text-sm">
-                      No hay ventas cerradas hoy todavía
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        {/* Historial de cierres */}
-        <div>
-          <h2 className="text-[#e6edf3] font-bold text-[17px] mb-3.5">Historial de cierres</h2>
-          <div className="bg-[#1c2128] border border-white/8 rounded-xl overflow-hidden">
-            <table className="w-full border-collapse">
-              <thead>
-                <tr className="border-b border-white/8">
-                  {["Fecha","Órdenes","Platos","Propinas","Gastos","Ingresos netos",""].map(h => (
-                    <th key={h} className="text-left px-4 py-2.5 text-[11px] font-bold text-[#484f58] uppercase tracking-[0.6px]">
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {summaryHistory.map((s, i) => (
-                  <tr
-                    key={s.id}
-                    className="transition-colors duration-100 hover:bg-white/[0.03]"
-                    style={{ borderBottom: i < summaryHistory.length - 1 ? "1px solid rgba(255,255,255,0.05)" : "none" }}
-                  >
-                    <td className="px-4 py-[11px] text-[#8b949e] text-[13px]">
-                      {new Date(s.date).toLocaleDateString("es-CO", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: "America/Bogota" })}
-                    </td>
-                    <td className="px-4 py-[11px] font-bold text-[#e6edf3]">{s.totalOrdenes}</td>
-                    <td className="px-4 py-[11px] text-[#8b949e] text-[13px]">{s.totalPlatos}</td>
-                    <td className="px-4 py-[11px] font-semibold text-amber-400 text-[13px]">
-                      ${s.totalPropinas.toLocaleString()}
-                    </td>
-                    <td className="px-4 py-[11px] font-semibold text-[#f87171] text-[13px]">
-                      {(s.totalGastos ?? 0) > 0
-                        ? `- $${(s.totalGastos ?? 0).toLocaleString()}`
-                        : <span className="text-[#484f58]">–</span>}
-                    </td>
-                    <td className="px-4 py-[11px] font-bold text-orange-500 text-sm">
-                      ${s.totalIngresos.toLocaleString()}
-                    </td>
-                    <td className="px-4 py-[11px]">
-                      <button
-                        onClick={() => handleDeleteSummary(s.id)}
-                        disabled={deletingId === s.id}
-                        title="Eliminar cierre"
-                        className={`flex items-center p-1 border-none bg-transparent cursor-pointer transition-colors ${
-                          deletingId === s.id ? "text-[#484f58]" : "text-[#f87171] hover:text-red-400"
-                        }`}
-                      >
-                        <Trash2 size={15} />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-                {summaryHistory.length === 0 && (
-                  <tr>
-                    <td colSpan={7} className="py-8 text-center text-[#484f58] text-sm">
-                      No hay cierres registrados aún
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        {/* Footer */}
-        <div className="mt-3 pt-5 border-t border-white/5 text-center">
-          <p className="text-[#484f58] text-xs">
-            Sistema desarrollado por{" "}
-            <span className="text-orange-500/70 font-semibold">@JuanCVO</span>
-          </p>
-        </div>
-
-      </div>
+    <div className={cn("flex items-baseline justify-between gap-3 py-2", !plain && "border-b border-dotted border-line")}>
+      <dt>{label}</dt>
+      <dd className={cn("font-semibold tnum", muted && "text-soft")}>{value}</dd>
     </div>
   )
 }

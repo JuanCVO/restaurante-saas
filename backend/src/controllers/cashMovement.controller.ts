@@ -3,18 +3,19 @@ import { prisma } from "../lib/prisma"
 import { CashMovementSchema } from "../lib/validators"
 import { asyncHandler } from "../lib/asyncHandler"
 import { BusinessError } from "../lib/errors"
-import { getColombiaDayRange } from "../lib/date"
+import { getOpenPeriod } from "../lib/period"
+import { audit } from "../lib/audit"
 
 export const createCashMovement = asyncHandler(async (req: Request, res: Response) => {
   const data = CashMovementSchema.parse(req.body)
 
   if (data.type === "BASE_CAJA") {
-    const { today, tomorrow } = getColombiaDayRange()
+    const { from } = await getOpenPeriod(data.restaurantId)
     const existingBase = await prisma.cashMovement.findFirst({
       where: {
         restaurantId: data.restaurantId,
         type: "BASE_CAJA",
-        createdAt: { gte: today, lt: tomorrow },
+        createdAt: { gt: from },
       },
     })
     if (existingBase) throw new BusinessError("DUPLICATE_BASE_CAJA", 409)
@@ -46,5 +47,6 @@ export const getCashMovementsByRestaurant = asyncHandler(async (req: Request, re
 export const deleteCashMovement = asyncHandler(async (req: Request, res: Response) => {
   const id = req.params.id as string
   await prisma.cashMovement.delete({ where: { id } })
+  audit(req, "cash.delete", { movementId: id })
   return res.json({ message: "Movimiento eliminado correctamente" })
 })

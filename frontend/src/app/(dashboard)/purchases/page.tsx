@@ -1,11 +1,20 @@
 "use client"
 
-import { useEffect, useState } from "react"
-import { ShoppingCart, TrendingDown, Wallet, Users, Trash2 } from "lucide-react"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { useCallback, useEffect, useState } from "react"
+import { ShoppingCart, Trash2, TrendingDown, Users, Wallet } from "lucide-react"
+
 import api from "@/lib/axios"
-import { useCurrentUser, authHeaders } from "@/lib/auth"
-import type { MovementType, CashMovement, EmployeePayment, Employee } from "@/types/api"
+import { useCurrentUser } from "@/lib/auth"
+import { apiMessage } from "@/lib/errors"
+import { cop, timeOfDay } from "@/lib/format"
+import { cn } from "@/lib/utils"
+import type { CashMovement, Employee, EmployeePayment, MovementType } from "@/types/api"
+import TopBar from "@/components/ui/layout/TopBar"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
+import { Field, Input, Select } from "@/components/ui/input"
+import { useToast } from "@/components/ui/toast"
 
 const TYPE_LABELS: Record<MovementType, string> = {
   COMPRA: "Compra",
@@ -13,19 +22,28 @@ const TYPE_LABELS: Record<MovementType, string> = {
   BASE_CAJA: "Base de caja",
 }
 
-const TYPE_COLORS: Record<MovementType, string> = {
-  COMPRA: "text-blue-400 bg-blue-500/10",
-  GASTO: "text-red-400 bg-red-500/10",
-  BASE_CAJA: "text-green-400 bg-green-500/10",
+const TYPE_TONE: Record<MovementType, "brand" | "bad" | "good"> = {
+  COMPRA: "brand",
+  GASTO: "bad",
+  BASE_CAJA: "good",
 }
 
-export default function ComprasPage() {
+type DeleteTarget =
+  | { kind: "movement"; id: string; label: string }
+  | { kind: "payment"; id: string; label: string }
+
+const sum = <T,>(items: T[], pick: (item: T) => number) => items.reduce((s, i) => s + pick(i), 0)
+
+export default function PurchasesPage() {
+  const toast = useToast()
+  const { token, restaurantId } = useCurrentUser()
+
   const [movements, setMovements] = useState<CashMovement[]>([])
   const [employees, setEmployees] = useState<Employee[]>([])
   const [payments, setPayments] = useState<EmployeePayment[]>([])
-  const [loading, setLoading] = useState(false)
-  const [loadingPago, setLoadingPago] = useState(false)
-  const { token, restaurantId } = useCurrentUser()
+  const [savingMovement, setSavingMovement] = useState(false)
+  const [savingBase, setSavingBase] = useState(false)
+  const [savingPayment, setSavingPayment] = useState(false)
 
   const [type, setType] = useState<MovementType>("COMPRA")
   const [concept, setConcept] = useState("")
@@ -39,471 +57,374 @@ export default function ComprasPage() {
   const [tipPago, setTipPago] = useState("")
   const [notesPago, setNotesPago] = useState("")
 
+  const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null)
+  const [deleting, setDeleting] = useState(false)
+
+  const fetchMovements = useCallback(async () => {
+    const res = await api.get(`/cash-movements/${restaurantId}`)
+    setMovements(res.data)
+  }, [restaurantId])
+
+  // "hoy" empieza en el último cierre
+  const [periodFrom, setPeriodFrom] = useState<number | null>(null)
+  const fetchPeriod = useCallback(async () => {
+    const res = await api.get(`/daily-summary/period/${restaurantId}`)
+    setPeriodFrom(new Date(res.data.from).getTime())
+  }, [restaurantId])
+
+  const fetchPayments = useCallback(async () => {
+    const res = await api.get(`/employee-payments/${restaurantId}`)
+    setPayments(res.data)
+  }, [restaurantId])
+
   useEffect(() => {
     if (!restaurantId || !token) return
-    const headers = authHeaders()
-    fetchMovements()
-    api.get(`/auth/users/${restaurantId}`, { headers })
+    fetchMovements().catch(err => toast.error(apiMessage(err, "No se pudieron cargar los movimientos.")))
+    fetchPayments().catch(err => toast.error(apiMessage(err, "No se pudieron cargar los pagos.")))
+    fetchPeriod().catch(() => {})
+    api.get(`/auth/users/${restaurantId}`)
       .then(res => setEmployees(res.data))
-      .catch(console.error)
-    fetchPayments()
-  }, [restaurantId, token])
+      .catch(() => {})
+  }, [restaurantId, token, fetchMovements, fetchPayments, fetchPeriod, toast])
 
-  const fetchMovements = async () => {
-    const headers = authHeaders()
-    const res = await api.get(`/cash-movements/${restaurantId}`, { headers })
-    setMovements(res.data)
-  }
-
-  const fetchPayments = async () => {
-    const headers = authHeaders()
-    const res = await api.get(`/employee-payments/${restaurantId}`, { headers })
-    setPayments(res.data)
-  }
+  useEffect(() => {
+    const reload = () => {
+      if (!restaurantId) return
+      fetchMovements().catch(() => {})
+      fetchPayments().catch(() => {})
+      fetchPeriod().catch(() => {})
+    }
+    window.addEventListener("day-closed", reload)
+    return () => window.removeEventListener("day-closed", reload)
+  }, [restaurantId, fetchMovements, fetchPayments, fetchPeriod])
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
-    if (!concept || !amount) return
-    setLoading(true)
+    if (!concept.trim() || !amount) return
+    setSavingMovement(true)
     try {
-      const headers = authHeaders()
-      await api.post(
-        "/cash-movements",
-        { type, concept, amount: Number(amount), paymentMethod, notes, restaurantId },
-        { headers }
-      )
+      await api.post("/cash-movements", {
+        type, concept: concept.trim(), amount: Number(amount), paymentMethod, notes, restaurantId,
+      })
       setConcept("")
       setAmount("")
       setNotes("")
       await fetchMovements()
+      toast.success(`${TYPE_LABELS[type]} registrada.`)
     } catch (err) {
-      console.error(err)
+      toast.error(apiMessage(err, "No se pudo registrar el movimiento."))
     } finally {
-      setLoading(false)
+      setSavingMovement(false)
     }
   }
 
-  const handleDelete = async (id: string) => {
-    const headers = authHeaders()
-    await api.delete(`/cash-movements/${id}`, { headers })
-    setMovements(prev => prev.filter(m => m.id !== id))
+  const handleBaseSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault()
+    if (!baseCajaAmount) return
+    setSavingBase(true)
+    try {
+      await api.post("/cash-movements", {
+        type: "BASE_CAJA",
+        concept: "Base de caja",
+        amount: Number(baseCajaAmount),
+        paymentMethod: "Efectivo",
+        restaurantId,
+      })
+      setBaseCajaAmount("")
+      await fetchMovements()
+      toast.success("Base de caja registrada.")
+    } catch (err) {
+      toast.error(apiMessage(err, "No se pudo registrar la base de caja."))
+    } finally {
+      setSavingBase(false)
+    }
   }
 
   const handlePagoSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
     if (!selectedEmployee || !salary) return
-    setLoadingPago(true)
+    setSavingPayment(true)
     try {
-      const headers = authHeaders()
-      await api.post(
-        "/employee-payments",
-        {
-          userId: selectedEmployee,
-          restaurantId,
-          salary: Number(salary),
-          tip: Number(tipPago || 0),
-          notes: notesPago || null,
-        },
-        { headers }
-      )
+      await api.post("/employee-payments", {
+        userId: selectedEmployee,
+        restaurantId,
+        salary: Number(salary),
+        tip: Number(tipPago || 0),
+        notes: notesPago || null,
+      })
       setSelectedEmployee("")
       setSalary("")
       setTipPago("")
       setNotesPago("")
       await fetchPayments()
+      toast.success("Pago registrado.")
     } catch (err) {
-      console.error(err)
+      toast.error(apiMessage(err, "No se pudo registrar el pago."))
     } finally {
-      setLoadingPago(false)
+      setSavingPayment(false)
     }
   }
 
-  const handleDeletePago = async (id: string) => {
-    const headers = authHeaders()
-    await api.delete(`/employee-payments/${id}`, { headers })
-    setPayments(prev => prev.filter(p => p.id !== id))
+  const handleDelete = async () => {
+    if (!deleteTarget) return
+    setDeleting(true)
+    try {
+      if (deleteTarget.kind === "movement") {
+        await api.delete(`/cash-movements/${deleteTarget.id}`)
+        setMovements(prev => prev.filter(m => m.id !== deleteTarget.id))
+      } else {
+        await api.delete(`/employee-payments/${deleteTarget.id}`)
+        setPayments(prev => prev.filter(p => p.id !== deleteTarget.id))
+      }
+      toast.success("Registro eliminado.")
+    } catch (err) {
+      toast.error(apiMessage(err, "No se pudo eliminar el registro."))
+    } finally {
+      setDeleting(false)
+      setDeleteTarget(null)
+    }
   }
 
-  const today = new Date().toDateString()
-  const movementsToday = movements.filter(
-    m => new Date(m.createdAt).toDateString() === today
-  )
-
-  const totalCompras = movementsToday.filter(m => m.type === "COMPRA").reduce((s, m) => s + m.amount, 0)
-  const totalGastos = movementsToday.filter(m => m.type === "GASTO").reduce((s, m) => s + m.amount, 0)
-  const baseCaja = movementsToday.filter(m => m.type === "BASE_CAJA").reduce((s, m) => s + m.amount, 0)
+  const movementsToday = periodFrom === null ? [] : movements.filter(m => new Date(m.createdAt).getTime() > periodFrom)
+  const totalOf = (t: MovementType) => sum(movementsToday.filter(m => m.type === t), m => m.amount)
+  const totalCompras = totalOf("COMPRA")
+  const totalGastos = totalOf("GASTO")
+  const baseCaja = totalOf("BASE_CAJA")
   const baseCajaYaRegistrada = movementsToday.some(m => m.type === "BASE_CAJA")
-  const totalPagosHoy = payments.reduce((s, p) => s + p.salary + p.tip, 0)
+  const totalSueldos = sum(payments, p => p.salary)
+  const totalPropinas = sum(payments, p => p.tip)
 
   const statCards = [
-    {
-      title: "Compras hoy",
-      value: `$${totalCompras.toLocaleString()}`,
-      icon: ShoppingCart,
-      color: "text-blue-400",
-      bg: "bg-blue-500/10",
-    },
-    {
-      title: "Gastos hoy",
-      value: `$${totalGastos.toLocaleString()}`,
-      icon: TrendingDown,
-      color: "text-red-400",
-      bg: "bg-red-500/10",
-    },
-    {
-      title: "Base de caja",
-      value: `$${baseCaja.toLocaleString()}`,
-      icon: Wallet,
-      color: "text-green-400",
-      bg: "bg-green-500/10",
-    },
-    {
-      title: "Pagos empleados hoy",
-      value: `$${totalPagosHoy.toLocaleString()}`,
-      icon: Users,
-      color: "text-purple-400",
-      bg: "bg-purple-500/10",
-    },
+    { title: "Compras hoy", value: cop(totalCompras), icon: ShoppingCart, tone: "text-brand bg-brand/15" },
+    { title: "Gastos hoy", value: cop(totalGastos), icon: TrendingDown, tone: "text-bad bg-bad/15" },
+    { title: "Base de caja", value: cop(baseCaja), icon: Wallet, tone: "text-good bg-good/15" },
+    { title: "Sueldos hoy", value: cop(totalSueldos), icon: Users, tone: "text-hot bg-hot/20" },
   ]
 
   return (
-    <div className="p-8 space-y-8 h-full overflow-y-auto">
+    <div className="flex min-h-0 flex-1 flex-col">
+      <TopBar title="Compras y gastos" />
 
-      <div>
-        <h1 className="text-3xl font-bold text-[#e6edf3]">Compras y Gastos</h1>
-        <p className="text-[#8b949e] mt-1">Registro de movimientos del día</p>
-      </div>
+      <div className="flex-1 overflow-y-auto px-4 pb-10 pt-2 md:px-7">
+        <p className="mb-5 max-w-2xl text-soft">
+          Todo lo que registres hoy se descuenta de la caja al cerrar el día: gastos, compras y sueldos.
+        </p>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
-        {statCards.map(stat => {
-          const Icon = stat.icon
-          return (
-            <Card key={stat.title} className="bg-[#1c2128] border-[#30363d]">
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-[#8b949e] text-sm font-medium">{stat.title}</CardTitle>
-                <div className={`${stat.bg} p-2 rounded-lg`}>
-                  <Icon className={`h-5 w-5 ${stat.color}`} />
+        <div className="mb-6 grid grid-cols-2 gap-3 xl:grid-cols-4">
+          {statCards.map(s => {
+            const Icon = s.icon
+            return (
+              <div key={s.title} className="flex items-center gap-3 rounded-lg bg-surface p-4">
+                <span className={cn("grid size-11 shrink-0 place-items-center rounded-md", s.tone)}><Icon size={20} /></span>
+                <div className="min-w-0">
+                  <p className="text-sm text-soft">{s.title}</p>
+                  <p className="truncate font-display text-xl font-bold tnum">{s.value}</p>
                 </div>
-              </CardHeader>
-              <CardContent>
-                <p className="text-2xl font-bold text-[#e6edf3]">{stat.value}</p>
-                <p className="text-[#8b949e] text-xs mt-1">solo movimientos de hoy</p>
-              </CardContent>
-            </Card>
-          )
-        })}
-      </div>
-
-      {/* Movimientos de caja */}
-      <Card className="bg-[#1c2128] border-[#30363d]">
-        <CardHeader>
-          <CardTitle className="text-[#e6edf3]">Registrar movimiento</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-6">
-
-          {!baseCajaYaRegistrada ? (
-            <form
-              onSubmit={async (e) => {
-                e.preventDefault()
-                if (!baseCajaAmount) return
-                setLoading(true)
-                try {
-                  const headers = authHeaders()
-                  await api.post("/cash-movements", {
-                    type: "BASE_CAJA",
-                    concept: "Base de caja",
-                    amount: Number(baseCajaAmount),
-                    paymentMethod: "Efectivo",
-                    restaurantId,
-                  }, { headers })
-                  setBaseCajaAmount("")
-                  await fetchMovements()
-                } catch (err) {
-                  console.error(err)
-                } finally {
-                  setLoading(false)
-                }
-              }}
-              className="flex items-center gap-4 bg-green-500/10 border border-green-500/20 rounded-xl px-5 py-4"
-            >
-              <Wallet className="h-5 w-5 text-green-400 shrink-0" />
-              <div className="flex-1">
-                <p className="text-[#e6edf3] font-medium text-sm mb-1">Base de caja</p>
-                <p className="text-[#8b949e] text-xs">Dinero inicial en caja para dar vueltas</p>
               </div>
-              <input
-                type="number"
-                value={baseCajaAmount}
-                onChange={e => setBaseCajaAmount(e.target.value)}
-                placeholder="Monto ($)"
-                min={1}
-                required
-                className="bg-[#161b22] border border-[#30363d] text-[#e6edf3] rounded-lg px-3 py-2 text-sm w-40 placeholder:text-[#8b949e] focus:outline-none focus:ring-2 focus:ring-green-500"
-              />
-              <button
-                type="submit"
-                disabled={loading || !baseCajaAmount}
-                className="bg-green-500 hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed text-white font-medium rounded-lg px-4 py-2 text-sm transition-colors whitespace-nowrap"
-              >
-                {loading ? "Guardando..." : "Registrar base"}
-              </button>
+            )
+          })}
+        </div>
+
+        <div className="grid gap-5 xl:grid-cols-2 xl:items-start">
+          <section className="flex flex-col gap-5 rounded-lg bg-surface p-4 sm:p-5">
+            <h2 className="font-display text-lg font-bold">Registrar movimiento</h2>
+
+            {!baseCajaYaRegistrada ? (
+              <form onSubmit={handleBaseSubmit} className="flex flex-col gap-3 rounded-lg bg-good/10 p-4 sm:flex-row sm:items-end">
+                <div className="flex flex-1 items-start gap-3">
+                  <Wallet size={20} className="mt-0.5 shrink-0 text-good" aria-hidden />
+                  <div>
+                    <p className="font-semibold">Base de caja</p>
+                    <p className="text-sm text-soft">Dinero inicial en caja para dar vueltos. Solo se registra una vez al día.</p>
+                  </div>
+                </div>
+                <div className="flex gap-2 sm:w-72">
+                  <Input
+                    type="number" inputMode="numeric" min={1} required
+                    value={baseCajaAmount} onChange={e => setBaseCajaAmount(e.target.value)}
+                    placeholder="Monto ($)" aria-label="Monto de la base de caja"
+                  />
+                  <Button type="submit" variant="success" loading={savingBase} disabled={!baseCajaAmount}>Registrar</Button>
+                </div>
+              </form>
+            ) : (
+              <div className="flex items-center gap-3 rounded-lg bg-good/10 p-4">
+                <Wallet size={20} className="shrink-0 text-good" aria-hidden />
+                <div>
+                  <p className="font-semibold text-good">Base de caja ya registrada hoy</p>
+                  <p className="text-sm text-soft tnum">{cop(baseCaja)} · no se puede modificar</p>
+                </div>
+              </div>
+            )}
+
+            <form onSubmit={handleSubmit} className="grid gap-4 sm:grid-cols-2">
+              <Field label="Tipo">
+                <Select value={type} onChange={e => setType(e.target.value as MovementType)}>
+                  <option value="COMPRA">Compra (ingredientes, gaseosas...)</option>
+                  <option value="GASTO">Gasto (domicilios, servicios...)</option>
+                </Select>
+              </Field>
+              <Field label="Método de pago">
+                <Select value={paymentMethod} onChange={e => setPaymentMethod(e.target.value)}>
+                  <option value="Efectivo">Efectivo</option>
+                  <option value="Nequi">Nequi</option>
+                  <option value="Datafono">Datafono</option>
+                </Select>
+              </Field>
+              <Field label="Concepto" className="sm:col-span-2">
+                <Input value={concept} onChange={e => setConcept(e.target.value)} placeholder="Ej. Gaseosas, arroz, domicilio" required />
+              </Field>
+              <Field label="Monto ($)">
+                <Input type="number" inputMode="numeric" min={1} value={amount} onChange={e => setAmount(e.target.value)} placeholder="0" required />
+              </Field>
+              <Field label="Notas (opcional)">
+                <Input value={notes} onChange={e => setNotes(e.target.value)} placeholder="Observación adicional" />
+              </Field>
+              <Button type="submit" size="lg" loading={savingMovement} className="sm:col-span-2">
+                {savingMovement ? "Guardando..." : `Registrar ${TYPE_LABELS[type].toLowerCase()}`}
+              </Button>
             </form>
-          ) : (
-            <div className="flex items-center gap-3 bg-green-500/5 border border-green-500/20 rounded-xl px-5 py-4">
-              <Wallet className="h-5 w-5 text-green-400" />
-              <div>
-                <p className="text-green-400 font-medium text-sm">Base de caja ya registrada hoy</p>
-                <p className="text-[#8b949e] text-xs">${baseCaja.toLocaleString()} — no se puede modificar</p>
-              </div>
-            </div>
-          )}
+          </section>
 
-          <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+          <section className="flex flex-col gap-5 rounded-lg bg-surface p-4 sm:p-5">
+            <h2 className="font-display text-lg font-bold">Pagos a empleados</h2>
 
-            <div className="flex flex-col gap-1">
-              <label className="text-[#8b949e] text-sm">Tipo</label>
-              <select
-                value={type === "BASE_CAJA" ? "COMPRA" : type}
-                onChange={e => setType(e.target.value as MovementType)}
-                className="bg-[#161b22] border border-[#30363d] text-[#e6edf3] rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
-              >
-                <option value="COMPRA">Compra (ingredientes)</option>
-                <option value="GASTO">Gasto (se resta del ingreso)</option>
-              </select>
-            </div>
+            <form onSubmit={handlePagoSubmit} className="grid gap-4 sm:grid-cols-2">
+              <Field label="Empleado" className="sm:col-span-2">
+                <Select value={selectedEmployee} onChange={e => setSelectedEmployee(e.target.value)} required>
+                  <option value="">Seleccionar empleado...</option>
+                  {employees.map(emp => (
+                    <option key={emp.id} value={emp.id}>{emp.name} ({emp.role === "ADMIN" ? "Admin" : "Empleado"})</option>
+                  ))}
+                </Select>
+              </Field>
+              <Field label="Pago del día ($)" hint="Sale de la caja de hoy">
+                <Input type="number" inputMode="numeric" min={0} value={salary} onChange={e => setSalary(e.target.value)} placeholder="0" required />
+              </Field>
+              <Field label="Propina entregada ($)" hint="No cuenta como gasto">
+                <Input type="number" inputMode="numeric" min={0} value={tipPago} onChange={e => setTipPago(e.target.value)} placeholder="0" />
+              </Field>
+              <Field label="Notas (opcional)" className="sm:col-span-2">
+                <Input value={notesPago} onChange={e => setNotesPago(e.target.value)} placeholder="Observación" />
+              </Field>
+              <Button type="submit" size="lg" loading={savingPayment} disabled={!selectedEmployee || !salary} className="sm:col-span-2">
+                {savingPayment ? "Guardando..." : "Registrar pago"}
+              </Button>
+            </form>
 
-            <div className="flex flex-col gap-1">
-              <label className="text-[#8b949e] text-sm">Concepto</label>
-              <input
-                type="text"
-                value={concept}
-                onChange={e => setConcept(e.target.value)}
-                placeholder="Ej: Compra de arroz, Domicilio..."
-                className="bg-[#161b22] border border-[#30363d] text-[#e6edf3] rounded-lg px-3 py-2 text-sm placeholder:text-[#8b949e] focus:outline-none focus:ring-2 focus:ring-orange-500"
-                required
-              />
-            </div>
-
-            <div className="flex flex-col gap-1">
-              <label className="text-[#8b949e] text-sm">Monto ($)</label>
-              <input
-                type="number"
-                value={amount}
-                onChange={e => setAmount(e.target.value)}
-                placeholder="0"
-                min={1}
-                className="bg-[#161b22] border border-[#30363d] text-[#e6edf3] rounded-lg px-3 py-2 text-sm placeholder:text-[#8b949e] focus:outline-none focus:ring-2 focus:ring-orange-500"
-                required
-              />
-            </div>
-
-            <div className="flex flex-col gap-1">
-              <label className="text-[#8b949e] text-sm">Método de pago</label>
-              <select
-                value={paymentMethod}
-                onChange={e => setPaymentMethod(e.target.value)}
-                className="bg-[#161b22] border border-[#30363d] text-[#e6edf3] rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
-              >
-                <option value="Efectivo">Efectivo</option>
-                <option value="Nequi">Nequi</option>
-                <option value="Datafono">Datafono</option>
-              </select>
-            </div>
-
-            <div className="flex flex-col gap-1">
-              <label className="text-[#8b949e] text-sm">Notas (opcional)</label>
-              <input
-                type="text"
-                value={notes}
-                onChange={e => setNotes(e.target.value)}
-                placeholder="Observación adicional..."
-                className="bg-[#161b22] border border-[#30363d] text-[#e6edf3] rounded-lg px-3 py-2 text-sm placeholder:text-[#8b949e] focus:outline-none focus:ring-2 focus:ring-orange-500"
-              />
-            </div>
-
-            <div className="flex items-end">
-              <button
-                type="submit"
-                disabled={loading}
-                className="w-full bg-orange-500 hover:bg-orange-600 disabled:opacity-50 disabled:cursor-not-allowed text-white font-medium rounded-lg px-4 py-2 text-sm transition-colors"
-              >
-                {loading ? "Guardando..." : "Registrar"}
-              </button>
-            </div>
-
-          </form>
-        </CardContent>
-      </Card>
-
-      {/* Pagos a empleados */}
-      <Card className="bg-[#1c2128] border-[#30363d]">
-        <CardHeader>
-          <CardTitle className="text-[#e6edf3]">Pagos a empleados</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-6">
-
-          <form onSubmit={handlePagoSubmit} className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-
-            <div className="flex flex-col gap-1">
-              <label className="text-[#8b949e] text-sm">Empleado</label>
-              <select
-                value={selectedEmployee}
-                onChange={e => setSelectedEmployee(e.target.value)}
-                required
-                className="bg-[#161b22] border border-[#30363d] text-[#e6edf3] rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
-              >
-                <option value="">Seleccionar empleado...</option>
-                {employees.map(emp => (
-                  <option key={emp.id} value={emp.id}>
-                    {emp.name} ({emp.role === "ADMIN" ? "Admin" : "Empleado"})
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="flex flex-col gap-1">
-              <label className="text-[#8b949e] text-sm">Pago del día ($)</label>
-              <input
-                type="number"
-                value={salary}
-                onChange={e => setSalary(e.target.value)}
-                placeholder="0"
-                min={0}
-                required
-                className="bg-[#161b22] border border-[#30363d] text-[#e6edf3] rounded-lg px-3 py-2 text-sm placeholder:text-[#8b949e] focus:outline-none focus:ring-2 focus:ring-purple-500"
-              />
-            </div>
-
-            <div className="flex flex-col gap-1">
-              <label className="text-[#8b949e] text-sm">Propina asignada ($)</label>
-              <input
-                type="number"
-                value={tipPago}
-                onChange={e => setTipPago(e.target.value)}
-                placeholder="0"
-                min={0}
-                className="bg-[#161b22] border border-[#30363d] text-[#e6edf3] rounded-lg px-3 py-2 text-sm placeholder:text-[#8b949e] focus:outline-none focus:ring-2 focus:ring-purple-500"
-              />
-            </div>
-
-            <div className="flex flex-col gap-1 md:col-span-2">
-              <label className="text-[#8b949e] text-sm">Notas (opcional)</label>
-              <input
-                type="text"
-                value={notesPago}
-                onChange={e => setNotesPago(e.target.value)}
-                placeholder="Observación..."
-                className="bg-[#161b22] border border-[#30363d] text-[#e6edf3] rounded-lg px-3 py-2 text-sm placeholder:text-[#8b949e] focus:outline-none focus:ring-2 focus:ring-purple-500"
-              />
-            </div>
-
-            <div className="flex items-end">
-              <button
-                type="submit"
-                disabled={loadingPago || !selectedEmployee || !salary}
-                className="w-full bg-purple-600 hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-medium rounded-lg px-4 py-2 text-sm transition-colors"
-              >
-                {loadingPago ? "Guardando..." : "Registrar pago"}
-              </button>
-            </div>
-
-          </form>
-
-          {payments.length > 0 ? (
             <div>
-              <p className="text-[#8b949e] text-sm mb-3">Pagos registrados hoy</p>
-              <div className="space-y-2">
-                {payments.map(p => (
-                  <div key={p.id} className="flex items-center justify-between bg-[#30363d]/40 rounded-lg px-4 py-3">
-                    <div>
-                      <p className="text-[#e6edf3] text-sm font-medium">{p.user.name}</p>
-                      <p className="text-[#8b949e] text-xs mt-0.5">
-                        Pago: ${p.salary.toLocaleString()}
-                        {p.tip > 0 && `  +  Propina: $${p.tip.toLocaleString()}`}
-                        {p.notes && `  ·  ${p.notes}`}
+              <h3 className="mb-2 font-display text-base font-bold">Pagos de hoy</h3>
+              {payments.length === 0 ? (
+                <p className="rounded-lg bg-canvas/60 py-6 text-center text-soft">No hay pagos registrados hoy.</p>
+              ) : (
+                <ul className="rounded-lg bg-canvas/60">
+                  {payments.map(p => (
+                    <li key={p.id} className="flex items-center gap-3 border-t border-line px-4 py-3 first:border-0">
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate font-semibold">{p.user.name}</p>
+                        <p className="text-sm text-soft tnum">
+                          Pago {cop(p.salary)}
+                          {p.tip > 0 && ` · Propina ${cop(p.tip)}`}
+                          {p.notes && ` · ${p.notes}`}
+                        </p>
+                      </div>
+                      <span className="font-display font-bold tnum">{cop(p.salary + p.tip)}</span>
+                      <button
+                        onClick={() => setDeleteTarget({ kind: "payment", id: p.id, label: `el pago de ${p.user.name}` })}
+                        aria-label={`Eliminar el pago de ${p.user.name}`}
+                        className="grid size-10 place-items-center rounded-md text-faint transition-colors hover:bg-bad/15 hover:text-bad"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </li>
+                  ))}
+                  <li className="flex justify-between border-t border-line px-4 py-3 text-[15px]">
+                    <span className="text-soft">Sueldos {cop(totalSueldos)} · Propinas {cop(totalPropinas)}</span>
+                  </li>
+                </ul>
+              )}
+            </div>
+          </section>
+        </div>
+
+        <section className="mt-5 rounded-lg bg-surface px-4 py-4 sm:px-5">
+          <h2 className="font-display text-lg font-bold">Historial de movimientos</h2>
+          {movements.length === 0 ? (
+            <p className="py-10 text-center text-soft">Todavía no hay movimientos registrados.</p>
+          ) : (
+            <>
+              <div className="mt-2 hidden overflow-x-auto md:block">
+                <table className="w-full border-collapse text-[15px]">
+                  <thead>
+                    <tr className="text-left text-sm text-soft">
+                      <th className="py-2 pr-4 font-semibold">Tipo</th>
+                      <th className="py-2 pr-4 font-semibold">Concepto</th>
+                      <th className="py-2 pr-4 font-semibold">Pago</th>
+                      <th className="py-2 pr-4 font-semibold">Notas</th>
+                      <th className="py-2 pr-4 font-semibold">Hora</th>
+                      <th className="py-2 pr-4 text-right font-semibold">Monto</th>
+                      <th className="w-12" aria-label="Acciones" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {movements.map(m => (
+                      <tr key={m.id} className="border-t border-line">
+                        <td className="py-3 pr-4"><Badge tone={TYPE_TONE[m.type]}>{TYPE_LABELS[m.type]}</Badge></td>
+                        <td className="py-3 pr-4 font-semibold">{m.concept}</td>
+                        <td className="py-3 pr-4 text-soft">{m.paymentMethod ?? "–"}</td>
+                        <td className="py-3 pr-4 text-soft">{m.notes || "–"}</td>
+                        <td className="py-3 pr-4 text-soft tnum">{timeOfDay(m.createdAt)}</td>
+                        <td className="py-3 pr-4 text-right font-display font-bold tnum">{cop(m.amount)}</td>
+                        <td className="py-1 text-right">
+                          <button
+                            onClick={() => setDeleteTarget({ kind: "movement", id: m.id, label: `"${m.concept}"` })}
+                            aria-label={`Eliminar ${m.concept}`}
+                            className="grid size-10 place-items-center rounded-md text-faint transition-colors hover:bg-bad/15 hover:text-bad"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <ul className="mt-2 md:hidden">
+                {movements.map(m => (
+                  <li key={m.id} className="flex items-center gap-3 border-t border-line py-3 first:border-0">
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate font-semibold">{m.concept}</p>
+                      <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-soft">
+                        <Badge tone={TYPE_TONE[m.type]}>{TYPE_LABELS[m.type]}</Badge>
+                        {m.paymentMethod ?? "–"} · {timeOfDay(m.createdAt)}
                       </p>
                     </div>
-                    <div className="flex items-center gap-4">
-                      <span className="text-purple-400 font-bold text-sm">
-                        ${(p.salary + p.tip).toLocaleString()}
-                      </span>
-                      <button
-                        onClick={() => handleDeletePago(p.id)}
-                        className="text-[#8b949e] hover:text-red-400 transition-colors"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    </div>
-                  </div>
+                    <span className="font-display font-bold tnum">{cop(m.amount)}</span>
+                    <button
+                      onClick={() => setDeleteTarget({ kind: "movement", id: m.id, label: `"${m.concept}"` })}
+                      aria-label={`Eliminar ${m.concept}`}
+                      className="grid size-10 place-items-center rounded-md text-faint hover:bg-bad/15 hover:text-bad"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </li>
                 ))}
-                <div className="flex justify-between px-4 pt-2 border-t border-[#30363d]">
-                  <span className="text-[#8b949e] text-sm">Total pagos hoy</span>
-                  <span className="text-purple-400 font-bold">${totalPagosHoy.toLocaleString()}</span>
-                </div>
-              </div>
-            </div>
-          ) : (
-            <p className="text-[#8b949e] text-sm text-center py-4">No hay pagos a empleados registrados hoy</p>
+              </ul>
+            </>
           )}
-
-        </CardContent>
-      </Card>
-
-      {/* Historial de movimientos */}
-      <div>
-        <h2 className="text-[#e6edf3] font-bold text-xl mb-4">Historial de movimientos</h2>
-        <Card className="bg-[#1c2128] border-[#30363d]">
-          <CardContent className="p-0">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-[#30363d]">
-                  <th className="text-left text-[#8b949e] font-medium p-4">Tipo</th>
-                  <th className="text-left text-[#8b949e] font-medium p-4">Concepto</th>
-                  <th className="text-left text-[#8b949e] font-medium p-4">Pago</th>
-                  <th className="text-left text-[#8b949e] font-medium p-4">Notas</th>
-                  <th className="text-left text-[#8b949e] font-medium p-4">Hora</th>
-                  <th className="text-left text-[#8b949e] font-medium p-4">Monto</th>
-                  <th className="text-left text-[#8b949e] font-medium p-4"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {movements.map(m => (
-                  <tr key={m.id} className="border-b border-[#30363d]/50 hover:bg-[#30363d]/30">
-                    <td className="p-4">
-                      <span className={`text-xs font-medium px-2 py-1 rounded-full ${TYPE_COLORS[m.type]}`}>
-                        {TYPE_LABELS[m.type]}
-                      </span>
-                    </td>
-                    <td className="p-4 text-[#e6edf3] text-sm">{m.concept}</td>
-                    <td className="p-4 text-[#c9d1d9] text-sm">{m.paymentMethod ?? "—"}</td>
-                    <td className="p-4 text-[#8b949e] text-sm">{m.notes || "—"}</td>
-                    <td className="p-4 text-[#8b949e] text-sm">
-                      {new Date(m.createdAt).toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit" })}
-                    </td>
-                    <td className="p-4 text-orange-400 font-bold">${m.amount.toLocaleString()}</td>
-                    <td className="p-4">
-                      <button
-                        onClick={() => handleDelete(m.id)}
-                        className="text-[#8b949e] hover:text-red-400 transition-colors"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-                {movements.length === 0 && (
-                  <tr>
-                    <td colSpan={7} className="p-8 text-center text-[#8b949e]">
-                      No hay movimientos registrados todavía
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </CardContent>
-        </Card>
+        </section>
       </div>
 
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        title="¿Eliminar registro?"
+        message={deleteTarget ? `Vas a eliminar ${deleteTarget.label}. Esta acción no se puede deshacer.` : ""}
+        confirmLabel="Sí, eliminar"
+        loading={deleting}
+        onConfirm={handleDelete}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   )
 }

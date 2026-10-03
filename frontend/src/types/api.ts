@@ -105,6 +105,9 @@ export type DashboardStats = {
   totalPlatos: number
   mesasOcupadas: number
   totalMesas: number
+  /** el último cierre (o el inicio de ayer si nunca se cerró) */
+  periodStart: string
+  lastCloseAt: string | null
 }
 
 export type DailySummary = {
@@ -116,6 +119,8 @@ export type DailySummary = {
   totalPropinas: number
   totalGastos: number
   totalPagosEmpleados: number
+  totalCompras?: number
+  propinasEntregadas?: number
   baseCaja: number
   efectivo: number
   datafono: number

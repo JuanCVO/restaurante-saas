@@ -1,0 +1,96 @@
+import { test } from "node:test"
+import assert from "node:assert/strict"
+
+import { renderEscPos, renderPlain, encodeText, wrap, row } from "./escpos"
+import { buildReceipt, buildTestReceipt, suggestedTip } from "./receipt"
+
+const hex = (b: ArrayLike<number>) => Array.from(b).map(x => x.toString(16).padStart(2, "0")).join(" ")
+const ascii = (b: ArrayLike<number>) => String.fromCharCode(...Array.from(b))
+
+test("tildes y ñ salen en PC850", () => {
+  assert.equal(hex(encodeText("ñÑáéíóú", false)), "a4 a5 a0 82 a1 a2 a3")
+  assert.equal(hex(encodeText("ÁÉÍÓÚ", false)), "b5 90 d6 e0 e9")
+  assert.equal(hex(encodeText("¿¡", false)), "a8 ad")
+})
+
+test("modo sin tildes", () => {
+  assert.equal(ascii(encodeText("Ñoquis á é ¿", true)), "Noquis a e ?")
+})
+
+test("espacios raros de la hora se vuelven espacios y lo desconocido un ?", () => {
+  assert.equal(ascii(encodeText("11:58 p. m.", false)), "11:58 p. m.")
+  assert.equal(ascii(encodeText("日", false)), "?")
+})
+
+test("wrap no corta palabras, salvo que no quepan", () => {
+  assert.deepEqual(wrap("Limonada de coco con hielo y menta", 20), ["Limonada de coco con", "hielo y menta"])
+  assert.ok(wrap("Supercalifragilistico", 10).every(l => l.length <= 10))
+})
+
+test("row deja el precio pegado a la derecha", () => {
+  const [line, ...rest] = row("2 Bandeja paisa", "$68.000", 42)
+  assert.equal(rest.length, 0)
+  assert.equal(line.length, 42)
+  assert.ok(line.startsWith("2 Bandeja paisa") && line.endsWith("$68.000"))
+})
+
+test("row con producto largo mantiene el precio en la primera línea", () => {
+  const lines = row("1 Limonada de coco con hielo y menta extra grande", "$8.500", 42)
+  assert.ok(lines.length >= 2)
+  assert.ok(lines[0].endsWith("$8.500"))
+  assert.ok(lines.every(l => l.length <= 42))
+})
+
+test("propina sugerida: 10% redondeado a la centena", () => {
+  assert.equal(suggestedTip(105500), 10600)
+  assert.equal(suggestedTip(76000), 7600)
+  assert.equal(suggestedTip(4000), 400)
+})
+
+test("tiquete de prueba cabe en 42 y en 48 columnas", () => {
+  const ops = buildTestReceipt("La Fogata", "")
+  const at42 = renderPlain(ops, { cols: 42 })
+  assert.ok(at42.split("\n").every(l => l.length <= 42))
+  assert.ok(at42.includes("$105.500") && at42.includes("$10.600") && at42.includes("$116.100"))
+
+  const at48 = renderPlain(ops, { cols: 48 })
+  assert.ok(at48.split("\n").every(l => l.length <= 48))
+  assert.ok(at48.split("\n").some(l => l.length > 42))
+})
+
+test("bytes ESC/POS: inicia en PC850, corta al final y usa doble tamaño en el total", () => {
+  const bytes = renderEscPos(buildTestReceipt("La Fogata", ""), { cols: 42, asciiOnly: false })
+  assert.equal(hex(bytes.slice(0, 5)), "1b 40 1b 74 02")
+  assert.equal(hex(bytes.slice(-4)), "1d 56 42 00")
+  assert.ok(hex(bytes).includes("1d 21 11") && hex(bytes).includes("1d 21 00"))
+  assert.ok(Array.from(bytes).includes(0xa5) && Array.from(bytes).includes(0xad))
+})
+
+test("modo sin tildes no cambia de código de página", () => {
+  const bytes = renderEscPos(buildTestReceipt("La Fogata", ""), { cols: 42, asciiOnly: true })
+  assert.equal(hex(bytes.slice(0, 2)), "1b 40")
+  assert.notEqual(hex(bytes.slice(0, 5)), "1b 40 1b 74 02")
+})
+
+test("comprobante de pago trae subtotal, propina, total, método y pie", () => {
+  const ops = buildReceipt({
+    kind: "pago",
+    restaurant: "La Fogata",
+    table: 4,
+    orderCode: "a41f9c02",
+    waiter: "Andrés Ruiz",
+    date: new Date("2026-09-30T02:15:00Z"),
+    items: [
+      { name: "Bandeja paisa", quantity: 2, unitPrice: 34000 },
+      { name: "Limonada", quantity: 2, unitPrice: 4000 },
+    ],
+    subtotal: 76000,
+    tip: 7600,
+    paymentMethod: "Efectivo",
+    footer: "Síguenos en @lafogata",
+  })
+  const text = renderPlain(ops, { cols: 42 })
+  for (const piece of ["$76.000", "$7.600", "$83.600", "Efectivo", "Síguenos en @lafogata"]) {
+    assert.ok(text.includes(piece), `falta ${piece}`)
+  }
+})

@@ -5,11 +5,13 @@ export const LoginSchema = z.object({
   password: z.string().min(1).max(120),
 })
 
-export const RegisterSchema = z.object({
-  name: z.string().min(2).max(80),
-  email: z.string().email().toLowerCase().max(120),
+export const ChangePasswordSchema = z.object({
+  currentPassword: z.string().min(1).max(120),
+  newPassword: z.string().min(8).max(72),
+})
+
+export const ResetPasswordSchema = z.object({
   password: z.string().min(8).max(72),
-  restaurantId: z.string().uuid(),
 })
 
 export const CreateEmployeeSchema = z.object({

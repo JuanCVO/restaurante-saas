@@ -10,6 +10,8 @@ export type ErrorCode =
   | "INVALID_CREDENTIALS"
   | "RESOURCE_NOT_FOUND"
   | "DUPLICATE_BASE_CAJA"
+  | "ORDER_EMPTY"
+  | "WRONG_PASSWORD"
 
 export class BusinessError extends Error {
   constructor(
@@ -34,4 +36,6 @@ export const messages: Record<ErrorCode, string> = {
   INVALID_CREDENTIALS: "Credenciales inválidas.",
   RESOURCE_NOT_FOUND:  "Recurso no encontrado.",
   DUPLICATE_BASE_CAJA: "La base de caja ya está registrada para hoy.",
+  ORDER_EMPTY:         "La orden no tiene productos.",
+  WRONG_PASSWORD:      "La contraseña actual no es correcta.",
 }

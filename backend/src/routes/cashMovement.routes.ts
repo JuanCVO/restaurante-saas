@@ -15,7 +15,7 @@ const movementOwner = ownsResource((id) =>
 )
 
 router.post("/", authMiddleware, adminOnly, sameRestaurant, createCashMovement)
-router.get("/:restaurantId", authMiddleware, sameRestaurant, getCashMovementsByRestaurant)
+router.get("/:restaurantId", authMiddleware, adminOnly, sameRestaurant, getCashMovementsByRestaurant)
 router.delete("/:id", authMiddleware, adminOnly, movementOwner, deleteCashMovement)
 
 export default router

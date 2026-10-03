@@ -1,9 +1,10 @@
 import { Request, Response } from "express"
 import { prisma } from "../lib/prisma"
 import { EmployeePaymentSchema } from "../lib/validators"
-import { getColombiaDayRange } from "../lib/date"
+import { getOpenPeriod } from "../lib/period"
 import { asyncHandler } from "../lib/asyncHandler"
 import { BusinessError } from "../lib/errors"
+import { audit } from "../lib/audit"
 
 export const createEmployeePayment = asyncHandler(async (req: Request, res: Response) => {
   const data = EmployeePaymentSchema.parse(req.body)
@@ -29,11 +30,11 @@ export const createEmployeePayment = asyncHandler(async (req: Request, res: Resp
   return res.status(201).json(payment)
 })
 
-export const getTodayPayments = asyncHandler(async (req: Request, res: Response) => {
+export const getPeriodPayments = asyncHandler(async (req: Request, res: Response) => {
   const restaurantId = req.params.restaurantId as string
-  const { today, tomorrow } = getColombiaDayRange()
+  const { from } = await getOpenPeriod(restaurantId)
   const payments = await prisma.employeePayment.findMany({
-    where: { restaurantId, createdAt: { gte: today, lt: tomorrow } },
+    where: { restaurantId, createdAt: { gt: from } },
     include: { user: { select: { name: true, role: true } } },
     orderBy: { createdAt: "asc" },
   })
@@ -51,5 +52,6 @@ export const deleteEmployeePayment = asyncHandler(async (req: Request, res: Resp
     throw new BusinessError("FORBIDDEN", 403)
   }
   await prisma.employeePayment.delete({ where: { id } })
+  audit(req, "payment.delete", { paymentId: id })
   return res.json({ message: "Pago eliminado" })
 })

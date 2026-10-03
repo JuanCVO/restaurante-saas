@@ -2,6 +2,7 @@ import "./lib/env"
 import express from "express"
 import cors from "cors"
 import helmet from "helmet"
+import rateLimit from "express-rate-limit"
 import { env } from "./lib/env"
 import { errorHandler } from "./middlewares/error.middleware"
 import authRoutes from "./routes/auth.routes"
@@ -22,21 +23,33 @@ app.use(helmet())
 const allowedOrigins = [
   "http://localhost:3000",
   "https://restaurante-saas-ashen.vercel.app",
+  ...(env.frontendUrl ? [env.frontendUrl] : []),
+  ...env.corsOrigins,
 ]
 
 app.use(cors({
   origin: function (origin, callback) {
     if (!origin) return callback(null, true)
     if (allowedOrigins.includes(origin)) return callback(null, true)
-    return callback(new Error(`Origen no permitido por CORS: ${origin}`))
+    return callback(null, false)
   },
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
   allowedHeaders: ["Content-Type", "Authorization"],
+  exposedHeaders: ["X-Report-Until", "Content-Disposition"],
   preflightContinue: false,
   optionsSuccessStatus: 204,
 }))
 
 app.use(express.json({ limit: "100kb" }))
+
+// tope general por IP; alto para que un local con varios dispositivos no lo note
+app.use("/api", rateLimit({
+  windowMs: 60 * 1000,
+  max: 600,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: "Demasiadas solicitudes. Espera un momento e intenta de nuevo." },
+}))
 
 if (!env.isProd) {
   app.use((req, _res, next) => {

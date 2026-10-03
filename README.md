@@ -37,8 +37,9 @@ Cada restaurante opera de forma completamente aislada (multi-tenant). Un emplead
 |---|---|
 | **Frontend** | Next.js 16 (App Router), React 19, TypeScript 5 |
 | **Estilos** | Tailwind CSS 4, shadcn/ui, Lucide React |
-| **Estado / Forms** | Zustand, React Hook Form, Zod |
-| **Gráficas** | Recharts |
+| **Formularios** | React Hook Form, Zod |
+| **Gráficas** | Barras en SVG propias (sin librería) |
+| **Tipografía** | Bitter (títulos) y Source Sans 3 (texto) |
 | **HTTP Client** | Axios |
 | **Backend** | Node.js, Express 5, TypeScript 6 |
 | **ORM** | Prisma 5 con PostgreSQL (Neon serverless) |
@@ -54,24 +55,36 @@ Cada restaurante opera de forma completamente aislada (multi-tenant). Un emplead
 
 | Módulo | Qué permite |
 |---|---|
-| **Dashboard** | Métricas del día: ingresos, órdenes, platos, gráficas por método de pago |
+| **Dashboard** | Resumen del día, gráfica de ventas, caja del día (neto) y propinas por entregar |
 | **Mesas** | Crear y configurar mesas, ver estado (disponible / ocupada) |
 | **Inventario** | Gestionar productos y categorías, ver alertas de stock bajo |
-| **Compras y Gastos** | Registrar compras, gastos y base de caja con método de pago |
-| **Empleados** | Crear cuentas de empleados, registrar salario y propinas |
+| **Compras y Gastos** | Registrar compras, gastos y base de caja; todo se descuenta de la caja del día |
+| **Empleados** | Crear cuentas de empleados y registrar sueldos y propinas entregadas |
 | **Resumen Diario** | Cierre de caja con totales consolidados |
-| **PDF** | Descargar reporte del período seleccionado |
+| **PDF** | Descargar el reporte completo (todos los cierres y el detalle de compras, gastos y pagos). Después se ofrece reiniciar el historial; el PDF queda como único respaldo |
 
 ### Para el empleado (EMPLOYEE)
 
 | Módulo | Qué permite |
 |---|---|
 | **Mesas** | Ver mesas disponibles y ocupadas |
-| **Órdenes** | Crear orden en una mesa, agregar productos, registrar método de pago y propina, cerrar orden |
+| **Órdenes** | Tocar una mesa abre la comanda encima (con el fondo borroso): agregar productos, elegir método de pago y propina, cerrar o cancelar la orden |
+
+### Cuentas del día
+
+```
+neto = ventas + base de caja − gastos − compras − sueldos
+```
+
+Las propinas son del personal y no cuentan como ingreso: se guardan aparte (cobradas y entregadas) y el dashboard muestra cuánto falta por entregar. **El "día" es todo lo ocurrido desde el último cierre**, no el día del calendario: una venta de las 11:58 p. m. sigue contando después de medianoche hasta que se cierre el día, y el cierre queda con la fecha del primer movimiento. Si nunca se ha cerrado, cuenta desde el inicio de ayer. Al cerrar el día se guarda el resumen y el dashboard vuelve a cero. Si hubo más ventas después, al cerrar de nuevo el resumen se recalcula con todas las órdenes de hoy.
+
+**Reiniciar el historial:** "Descargar PDF" genera el reporte y luego pregunta si borrar lo que contiene (cierres, compras, gastos, pagos y órdenes archivadas). Solo se borra lo registrado hasta el último cierre; lo posterior no se toca.
 
 ---
 
 ## Arquitectura
+
+Las pruebas de la lógica pura (fechas, impresión) corren con `npm test` dentro de `backend/` y `frontend/`.
 
 ```
 restaurante-saas/
@@ -95,6 +108,9 @@ restaurante-saas/
 │           ├── env.ts              # Variables de entorno validadas
 │           ├── errors.ts           # BusinessError tipado
 │           ├── validators.ts       # Schemas Zod
+│           ├── period.ts           # "El día": lo abierto desde el último cierre
+│           ├── date.ts             # Día colombiano (UTC-5)
+│           ├── audit.ts            # Registro de acciones sensibles
 │           └── asyncHandler.ts     # Wrapper try/catch para controllers
 └── frontend/
     └── src/
@@ -111,7 +127,10 @@ restaurante-saas/
         │   └── layout/Sidebar.tsx  # Navegación principal responsiva
         ├── lib/
         │   ├── axios.ts            # Instancia con interceptor JWT
-        │   └── auth.ts             # setSession / getSession / clearSession
+        │   ├── auth.ts             # Sesión (useCurrentUser, setSession, clearSession)
+        │   ├── escpos.ts           # Comandos ESC/POS y tildes (PC850)
+        │   ├── receipt.ts          # Cuenta / comprobante para la térmica
+        │   └── printer.ts          # Conexión WebUSB con la impresora
         └── types/
 ```
 
@@ -127,37 +146,90 @@ Restaurant
   └── DailySummary
 ```
 
+### Roles
+
+| Acción | Administrador | Empleado |
+|---|---|---|
+| Ver mesas y productos, abrir órdenes, cobrar y cancelar | Sí | Sí |
+| Crear o eliminar mesas, productos y categorías | Sí | No |
+| Dashboard, estadísticas, caja, compras, gastos y pagos | Sí | No |
+| Cerrar el día, descargar el reporte y reiniciar el historial | Sí | No |
+| Crear empleados, cambiar sus contraseñas y desactivarlos | Sí | No |
+
+Los permisos se validan en el backend en cada petición; la interfaz solo oculta lo que no corresponde.
+
 ### Multi-tenancy y seguridad
 
-- Cada request autenticado lleva `restaurantId` en el JWT
-- `adminOnly` middleware hace un query fresco a la DB en cada request de admin (evita escalada de privilegios con tokens viejos)
-- Todos los recursos se filtran por `restaurantId` — ningún tenant puede ver datos de otro
-- CORS con allowlist explícita (`localhost:3000` + dominio de producción en Vercel)
-- Body limit de 100kb para prevenir payload abuse
+- Cada petición confirma en la base que la cuenta existe y sigue activa; el rol y el restaurante salen de la base, no del token. Un empleado eliminado o desactivado pierde el acceso al instante.
+- Todos los recursos se filtran por restaurante; ningún restaurante puede ver ni tocar datos de otro (probado con dos restaurantes).
+- Las acciones de administrador confirman el rol directamente en la base, sin caché.
+- Contraseñas con bcrypt (costo 12), mínimo 8 caracteres. El login tarda lo mismo exista o no el correo y solo cuentan los intentos fallidos (20 cada 15 minutos por IP). Hay además un tope general de 600 peticiones por minuto por IP.
+- Un empleado con órdenes o pagos no se borra: se desactiva (deja de poder entrar y su historial se conserva).
+- Helmet en la API; en el frontend, cabeceras de seguridad y una política CSP en producción que solo deja hablar con la propia app y con la API.
+- CORS con lista de orígenes explícita (`localhost:3000`, el dominio de producción y lo que se defina en `FRONTEND_URL` / `CORS_ORIGINS`).
+- Registro en los logs (líneas JSON con `"type":"audit"`) de quién cierra el día, reinicia el historial o elimina datos.
+- No existe un endpoint público para registrarse.
+- En producción define `NODE_ENV=production`: sin eso los errores internos muestran más detalle del debido.
 
 ---
 
 ### 2. Instalación
 
+Crea `backend/.env` (hay un ejemplo en `backend/.env.example`):
+
+```
+DATABASE_URL=postgresql://usuario:clave@host/db?sslmode=require
+JWT_SECRET=una-cadena-aleatoria-de-32-o-mas-caracteres
+PORT=3001
+# Opcionales
+# CORS_ORIGINS=http://192.168.1.50:3000      # para probar desde el celular en la misma red
+# ARCHIVE_RETENTION_DAYS=60                  # borra órdenes archivadas viejas (los cierres se conservan)
+```
+
+Y `frontend/.env.local`:
+
+```
+NEXT_PUBLIC_API_URL=http://localhost:3001/api/
+```
+
 ```bash
 # Backend
 cd backend
 npm install
-npx prisma migrate dev    # Crea las tablas en la DB
-npm run dev               # Inicia en http://localhost:4000
+npx prisma migrate deploy   # aplica las migraciones (base nueva o existente)
+npm run dev                 # http://localhost:3001
 
-# Frontend — en otra terminal
+# Frontend, en otra terminal
 cd frontend
 npm install
-npm run dev               # Inicia en http://localhost:3000
+npm run dev                 # http://localhost:3000
 ```
 
 ### 3. Primer uso
 
-1. Crear el primer restaurante + admin vía `POST /api/auth/register`
-2. Iniciar sesión en `http://localhost:3000/login`
-3. El admin puede crear empleados desde el módulo de Empleados
+El primer restaurante y su administrador se crean desde la terminal, sin ningún endpoint público:
 
+```bash
+cd backend
+npm run create-admin -- "Nombre del restaurante" correo@ejemplo.com "una-clave-de-8-o-mas"
+```
+
+Muestra a qué base se conecta y pide confirmar antes de escribir. Después:
+
+1. Iniciar sesión en `http://localhost:3000/login`
+2. El admin crea empleados desde el módulo de Empleados (contraseña de mínimo 8 caracteres)
+
+### Impresora térmica (tiquetes de 80 mm)
+
+La app imprime directo a una impresora ESC/POS por USB, sin instalar nada más (WebUSB). Probada con la Digital POS DIG-C80250II, que solo trae USB, serial y Ethernet: no tiene Bluetooth ni wifi.
+
+- **Quién imprime:** solo la caja (rol Administrador). Los meseros toman el pedido desde el celular, que no se conecta por USB, así que no ven el botón «Impresora» ni «Imprimir cuenta».
+- **Qué imprime:** la cuenta (con propina voluntaria sugerida del 10%) desde el botón «Imprimir cuenta» de la comanda, y el comprobante de pago al cobrar si «Imprimir al cobrar» está activo.
+- **Conexión en la tablet Android:** cable USB-B de la impresora + adaptador OTG (USB-C o micro USB a USB-A hembra). En **Chrome**, menú «Impresora» → «Conectar impresora» → elegir la impresora y aceptar el permiso. Se recuerda y se reconecta sola.
+- **Requisito:** la página debe abrirse por **https** (Vercel lo cumple) o por `localhost`. Desde `http://IP-local:3000` Chrome bloquea USB; para probar así, activa `chrome://flags/#unsafely-treat-insecure-origin-as-secure` y agrega esa dirección.
+- **Ajustes** (se guardan en cada dispositivo): ancho del texto (42 o 48 caracteres), «Sin tildes ni ñ» si en el papel salen símbolos raros, y el mensaje del final.
+- **Si el navegador no soporta USB** (Safari, Firefox), «Imprimir cuenta» usa el diálogo de impresión del navegador con formato de 80 mm.
+- **Plan B en Android:** la app RawBT acepta comandos ESC/POS por USB o red.
 
 ---
 ## Despliegue en producción

@@ -20,5 +20,9 @@ export const env = {
   port: Number(process.env.PORT ?? 3001),
   nodeEnv: process.env.NODE_ENV ?? "development",
   frontendUrl: process.env.FRONTEND_URL,
+  // orígenes extra, por ejemplo la IP local para probar desde el celular
+  corsOrigins: (process.env.CORS_ORIGINS ?? "").split(",").map(o => o.trim()).filter(Boolean),
+  // si no se define, no se borra nada
+  archiveRetentionDays: process.env.ARCHIVE_RETENTION_DAYS ? Number(process.env.ARCHIVE_RETENTION_DAYS) : null,
   isProd: process.env.NODE_ENV === "production",
 }

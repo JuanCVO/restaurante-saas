@@ -32,6 +32,7 @@ model User {
   email        String     @unique
   password     String
   role         Role       @default(EMPLOYEE)
+  active       Boolean    @default(true)
   restaurantId String
   restaurant   Restaurant @relation(fields: [restaurantId], references: [id])
   createdAt    DateTime   @default(now())
@@ -87,6 +88,7 @@ model Table {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
+  @@unique([restaurantId, number])
   @@index([restaurantId])
 }
 
@@ -108,10 +110,12 @@ model Order {
   tableId      String?
   table        Table?      @relation(fields: [tableId], references: [id], onDelete: SetNull)
   createdAt    DateTime    @default(now())
+  closedAt     DateTime?
 
   items OrderItem[]
 
   @@index([restaurantId, status, createdAt])
+  @@index([restaurantId, closedAt])
   @@index([tableId, status])
   @@index([userId])
 }
@@ -148,6 +152,8 @@ model DailySummary {
   totalPropinas       Float    @default(0)
   totalGastos         Float    @default(0)
   totalPagosEmpleados Float    @default(0)
+  totalCompras        Float    @default(0)
+  propinasEntregadas  Float    @default(0)
   baseCaja            Float    @default(0)
   restaurantId        String
   restaurant      Restaurant @relation(fields: [restaurantId], references: [id])
