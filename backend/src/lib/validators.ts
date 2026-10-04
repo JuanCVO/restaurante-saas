@@ -70,8 +70,11 @@ export const AddItemSchema = z.object({
 })
 
 export const CloseOrderSchema = z.object({
-  paymentMethod: z.enum(["Efectivo", "Datafono", "Nequi"]),
+  paymentMethod: z.enum(["Efectivo", "Nequi", "Bancolombia", "Mixto"]),
   tip: z.number().min(0).max(1_000_000_000).optional(),
+  // solo en pago mixto: lo que se pagó en efectivo y por dónde se pagó el resto
+  cashAmount: z.number().min(0).max(1_000_000_000).optional(),
+  transferMethod: z.enum(["Nequi", "Bancolombia"]).optional(),
 })
 
 export const CloseDaySchema = z.object({

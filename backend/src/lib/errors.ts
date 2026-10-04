@@ -12,6 +12,7 @@ export type ErrorCode =
   | "DUPLICATE_BASE_CAJA"
   | "ORDER_EMPTY"
   | "WRONG_PASSWORD"
+  | "INVALID_SPLIT"
 
 export class BusinessError extends Error {
   constructor(
@@ -38,4 +39,5 @@ export const messages: Record<ErrorCode, string> = {
   DUPLICATE_BASE_CAJA: "La base de caja ya está registrada para hoy.",
   ORDER_EMPTY:         "La orden no tiene productos.",
   WRONG_PASSWORD:      "La contraseña actual no es correcta.",
+  INVALID_SPLIT:       "En el pago mixto, el efectivo debe ser mayor a 0 y menor al total, y hay que elegir cómo se pagó el resto.",
 }

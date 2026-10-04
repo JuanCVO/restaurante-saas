@@ -224,7 +224,7 @@ Muestra a qué base se conecta y pide confirmar antes de escribir. Después:
 La app imprime directo a una impresora ESC/POS por USB, sin instalar nada más (WebUSB). Probada con la Digital POS DIG-C80250II, que solo trae USB, serial y Ethernet: no tiene Bluetooth ni wifi.
 
 - **Quién imprime:** solo la caja (rol Administrador). Los meseros toman el pedido desde el celular, que no se conecta por USB, así que no ven el botón «Impresora» ni «Imprimir cuenta».
-- **Qué imprime:** la cuenta (con propina voluntaria sugerida del 10%) desde el botón «Imprimir cuenta» de la comanda, y el comprobante de pago al cobrar si «Imprimir al cobrar» está activo.
+- **Qué imprime:** la cuenta (con propina voluntaria sugerida cercana al 10%, ajustada para que el total quede en billetes) desde el botón «Imprimir cuenta» de la comanda, y el comprobante de pago al cobrar si «Imprimir al cobrar» está activo.
 - **Conexión en la tablet Android:** cable USB-B de la impresora + adaptador OTG (USB-C o micro USB a USB-A hembra). En **Chrome**, menú «Impresora» → «Conectar impresora» → elegir la impresora y aceptar el permiso. Se recuerda y se reconecta sola.
 - **Requisito:** la página debe abrirse por **https** (Vercel lo cumple) o por `localhost`. Desde `http://IP-local:3000` Chrome bloquea USB; para probar así, activa `chrome://flags/#unsafely-treat-insecure-origin-as-secure` y agrega esa dirección.
 - **Ajustes** (se guardan en cada dispositivo): ancho del texto (42 o 48 caracteres), «Sin tildes ni ñ» si en el papel salen símbolos raros, y el mensaje del final.

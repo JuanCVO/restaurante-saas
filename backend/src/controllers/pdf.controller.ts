@@ -30,6 +30,21 @@ const drawDivider = (doc: PDFKit.PDFDocument, color = "#eeeeee") => {
   doc.moveDown(0.7)
 }
 
+// Cierre de la caja: solo el efectivo. Base + ventas en efectivo − compras y gastos pagados en efectivo.
+const drawCashClose = (
+  doc: PDFKit.PDFDocument,
+  v: { base: number; efectivo: number; compras: number; gastos: number },
+  title = "Cierre de caja (solo efectivo)"
+) => {
+  doc.fontSize(13).font("Helvetica-Bold").fillColor("#000000").text(title)
+  doc.moveDown(0.4)
+  drawRow(doc, "Base de caja",                 `+ ${col(v.base)}`,     "#3498db")
+  drawRow(doc, "Ventas en efectivo",           `+ ${col(v.efectivo)}`, "#27ae60")
+  drawRow(doc, "Compras pagadas en efectivo",  `- ${col(v.compras)}`,  "#e74c3c")
+  drawRow(doc, "Gastos pagados en efectivo",   `- ${col(v.gastos)}`,   "#e74c3c")
+  drawRow(doc, "Efectivo en caja", col(v.base + v.efectivo - v.compras - v.gastos), "#000000", true)
+}
+
 const drawFooter = (doc: PDFKit.PDFDocument) => {
   doc.moveDown(2)
   drawDivider(doc)
@@ -81,7 +96,7 @@ export const downloadTodayPDF = async (req: Request, res: Response) => {
     drawRow(doc, "Mesas cerradas",  `${summary.totalOrdenes}`)
     drawRow(doc, "Platos vendidos", `${summary.totalPlatos}`)
     drawRow(doc, "Efectivo",        col(summary.efectivo))
-    drawRow(doc, "Datáfono",        col(summary.datafono))
+    drawRow(doc, "Bancolombia",     col(summary.bancolombia))
     drawRow(doc, "Nequi",           col(summary.nequi))
     const baseCajaPDF = summary.baseCaja ?? 0
     if (baseCajaPDF > 0) {
@@ -132,7 +147,7 @@ export const downloadTodayPDF = async (req: Request, res: Response) => {
     // Resumen neto
     doc.fontSize(13).font("Helvetica-Bold").fillColor("#000000").text("Resumen neto")
     doc.moveDown(0.4)
-    const ventasBrutas = summary.efectivo + summary.datafono + summary.nequi
+    const ventasBrutas = summary.efectivo + summary.bancolombia + summary.nequi
     drawRow(doc, "Ventas brutas",          col(ventasBrutas))
     if (baseCajaPDF > 0) {
       drawRow(doc, "Base de caja",         `+ ${col(baseCajaPDF)}`, "#3498db")
@@ -141,6 +156,15 @@ export const downloadTodayPDF = async (req: Request, res: Response) => {
     drawRow(doc, "Compras",                `- ${col(totalCompras)}`, "#e74c3c")
     drawRow(doc, "Sueldos",                `- ${col(totalPagosEmpleados)}`, "#8e44ad")
     drawRow(doc, "Neto del día",           col(summary.totalIngresos), "#27ae60", true)
+
+    drawDivider(doc, "#dddddd")
+
+    drawCashClose(doc, {
+      base: baseCajaPDF,
+      efectivo: summary.efectivo,
+      compras: summary.comprasEfectivo ?? 0,
+      gastos: summary.gastosEfectivo ?? 0,
+    })
 
     drawFooter(doc)
     doc.end()
@@ -205,21 +229,23 @@ export const downloadSummaryPDF = async (req: Request, res: Response) => {
     const totalIngresos       = summaries.reduce((s, d) => s + d.totalIngresos, 0)
     const totalOrdenes        = summaries.reduce((s, d) => s + d.totalOrdenes, 0)
     const totalEfectivo       = summaries.reduce((s, d) => s + d.efectivo, 0)
-    const totalDatafono       = summaries.reduce((s, d) => s + d.datafono, 0)
+    const totalBancolombia    = summaries.reduce((s, d) => s + d.bancolombia, 0)
+    const totalComprasEf      = summaries.reduce((s, d) => s + (d.comprasEfectivo ?? 0), 0)
+    const totalGastosEf       = summaries.reduce((s, d) => s + (d.gastosEfectivo ?? 0), 0)
     const totalNequi          = summaries.reduce((s, d) => s + d.nequi, 0)
     const totalPropinas       = summaries.reduce((s, d) => s + (d.totalPropinas ?? 0), 0)
     const totalGastos         = summaries.reduce((s, d) => s + (d.totalGastos ?? 0), 0)
     const totalCompras        = summaries.reduce((s, d) => s + (d.totalCompras ?? 0), 0)
     const totalPagosEmpleados = summaries.reduce((s, d) => s + (d.totalPagosEmpleados ?? 0), 0)
     const totalBase           = summaries.reduce((s, d) => s + (d.baseCaja ?? 0), 0)
-    const ventasBrutas        = totalEfectivo + totalDatafono + totalNequi
+    const ventasBrutas        = totalEfectivo + totalBancolombia + totalNequi
 
     doc.fontSize(13).font("Helvetica-Bold").fillColor("#000000").text("Resumen general")
     doc.moveDown(0.4)
     drawRow(doc, "Días cerrados",          `${summaries.length}`)
     drawRow(doc, "Total órdenes",          `${totalOrdenes}`)
     drawRow(doc, "Efectivo",               col(totalEfectivo))
-    drawRow(doc, "Datáfono",               col(totalDatafono))
+    drawRow(doc, "Bancolombia",            col(totalBancolombia))
     drawRow(doc, "Nequi",                  col(totalNequi))
     drawRow(doc, "Ventas brutas",          col(ventasBrutas))
     drawRow(doc, "Base de caja",           `+ ${col(totalBase)}`, "#3498db")
@@ -232,6 +258,10 @@ export const downloadSummaryPDF = async (req: Request, res: Response) => {
 
     drawDivider(doc, "#cccccc")
 
+    drawCashClose(doc, { base: totalBase, efectivo: totalEfectivo, compras: totalComprasEf, gastos: totalGastosEf })
+
+    drawDivider(doc, "#cccccc")
+
     // Detalle por día
     doc.fontSize(13).font("Helvetica-Bold").fillColor("#000000").text("Detalle por día")
     doc.moveDown(0.6)
@@ -241,12 +271,14 @@ export const downloadSummaryPDF = async (req: Request, res: Response) => {
       const comprasDia  = summary.totalCompras ?? 0
       const pagosDia    = summary.totalPagosEmpleados ?? 0
       const baseCajaDia = summary.baseCaja ?? 0
-      const ventasDia   = summary.efectivo + summary.datafono + summary.nequi
+      const ventasDia   = summary.efectivo + summary.bancolombia + summary.nequi
+      const cajaDia     = baseCajaDia + summary.efectivo - (summary.comprasEfectivo ?? 0) - (summary.gastosEfectivo ?? 0)
 
       doc.fontSize(11).font("Helvetica-Bold").fillColor("#e67e22").text(fmtDate(summary.date))
       doc.fontSize(10).font("Helvetica").fillColor("#333333")
         .text(`  Ventas: ${col(ventasDia)}   |   Órdenes: ${summary.totalOrdenes}   |   Platos: ${summary.totalPlatos}`)
-      doc.text(`  Efectivo: ${col(summary.efectivo)}   |   Datáfono: ${col(summary.datafono)}   |   Nequi: ${col(summary.nequi)}`)
+      doc.text(`  Efectivo: ${col(summary.efectivo)}   |   Bancolombia: ${col(summary.bancolombia)}   |   Nequi: ${col(summary.nequi)}`)
+      doc.text(`  Efectivo en caja: ${col(cajaDia)}`)
       doc.fillColor("#27ae60").text(`  Propinas: ${col(summary.totalPropinas ?? 0)}`)
       if (baseCajaDia > 0) doc.fillColor("#3498db").text(`  Base de caja: ${col(baseCajaDia)}`)
       if (gastosDia > 0)   doc.fillColor("#e74c3c").text(`  Gastos: ${col(gastosDia)}`)

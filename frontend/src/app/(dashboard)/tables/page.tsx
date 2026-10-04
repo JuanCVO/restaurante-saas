@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { CheckCircle2, Loader2, Minus, Plus, Printer, Search, Trash2 } from "lucide-react"
 
 import api from "@/lib/axios"
@@ -9,7 +9,7 @@ import { apiMessage } from "@/lib/errors"
 import { cop, elapsed, isToday } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { OPEN_PRINTER_EVENT, PrinterError, usePrinter } from "@/lib/printer"
-import { buildReceipt, type ReceiptData } from "@/lib/receipt"
+import { buildReceipt, suggestedTip, type ReceiptData } from "@/lib/receipt"
 import type { Table, Order, OrderItem } from "@/types/api"
 import TopBar from "@/components/ui/layout/TopBar"
 import { Button } from "@/components/ui/button"
@@ -39,7 +39,8 @@ type ConfirmState = {
   onConfirm: () => Promise<void> | void
 }
 
-const PAYMENT_METHODS = ["Efectivo", "Datafono", "Nequi"] as const
+const PAYMENT_METHODS = ["Efectivo", "Nequi", "Bancolombia", "Mixto"] as const
+const TRANSFER_METHODS = ["Nequi", "Bancolombia"] as const
 const TIP_PRESETS = [0, 2000, 5000, 10000]
 
 export default function TablesPage() {
@@ -66,9 +67,16 @@ export default function TablesPage() {
   const [categoryFilter, setCategoryFilter] = useState("Todas")
   const [quantities, setQuantities] = useState<Record<string, number>>({})
   const [pending, setPending] = useState(0)
+  // cuántos «agregar» van en vuelo; el estado de arriba pinta la pantalla, esta cuenta decide cuándo sincronizar
+  const inFlight = useRef(0)
   const [showPayment, setShowPayment] = useState(false)
   const [paymentMethod, setPaymentMethod] = useState("")
+  // pago mixto: lo que se pagó en efectivo y por dónde se pagó el resto
+  const [cashPaid, setCashPaid] = useState(0)
+  const [transferMethod, setTransferMethod] = useState("")
   const [tipAmount, setTipAmount] = useState(0)
+  // lo que se escribe en «Otro valor»; aparte de tipAmount para no borrar el campo mientras se teclea
+  const [tipText, setTipText] = useState("")
   const [submitting, setSubmitting] = useState(false)
 
   const [confirm, setConfirm] = useState<ConfirmState | null>(null)
@@ -118,7 +126,10 @@ export default function TablesPage() {
     setSelectedTable(null)
     setShowPayment(false)
     setPaymentMethod("")
+    setCashPaid(0)
+    setTransferMethod("")
     setTipAmount(0)
+    setTipText("")
     setProductSearch("")
     setCategoryFilter("Todas")
     setPane("products")
@@ -145,7 +156,10 @@ export default function TablesPage() {
       setPane("products")
       setShowPayment(false)
       setPaymentMethod("")
+      setCashPaid(0)
+      setTransferMethod("")
       setTipAmount(0)
+      setTipText("")
       setModalOpen(true)
     } catch (err) {
       toast.error(apiMessage(err, "No se pudo abrir la mesa."))
@@ -158,6 +172,18 @@ export default function TablesPage() {
   const changeQty = (productId: string, delta: number) =>
     setQuantities(q => ({ ...q, [productId]: Math.max(1, (q[productId] ?? 1) + delta) }))
 
+  // Lo que se ve es provisional mientras hay peticiones en vuelo. Al terminar la última, se vuelve a leer del
+  // servidor la cuenta y el stock: así lo que se muestra es lo que de verdad quedó guardado, falle lo que falle.
+  const syncFromServer = async (orderId: string) => {
+    try {
+      const [order, list] = await Promise.all([api.get(`/orders/${orderId}`), api.get(`/products/${restaurantId}`)])
+      setActiveOrder(prev => (prev && prev.id === orderId ? order.data : prev))
+      setProducts(list.data)
+    } catch {
+      // sin red se queda lo que ya se ve; la próxima vez que se abra la mesa se carga completo
+    }
+  }
+
   const addProduct = async (product: Product) => {
     if (!activeOrder || !selectedTable) return
     const quantity = getQty(product.id)
@@ -166,8 +192,7 @@ export default function TablesPage() {
       return
     }
 
-    const prevOrder = activeOrder
-    const prevProducts = products
+    const orderId = activeOrder.id
     const tableId = selectedTable.id
     const existingItem = activeOrder.items?.find((i: OrderItem) => i.product.id === product.id)
 
@@ -193,22 +218,15 @@ export default function TablesPage() {
     setQuantities(q => ({ ...q, [product.id]: 1 }))
     setTables(prev => prev && prev.map(t => t.id === tableId ? { ...t, status: "OCUPADA" } : t))
     setPending(n => n + 1)
+    inFlight.current += 1
 
     try {
-      const { data: savedItem } = await api.post(`/orders/${activeOrder.id}/items`, { productId: product.id, quantity })
-      setActiveOrder(prev => {
-        if (!prev) return prev
-        const items = prev.items.map((i: OrderItem) =>
-          i.id === `temp-${product.id}` ? { ...savedItem, product } : i
-        )
-        const total = items.reduce((sum: number, i: OrderItem) => sum + i.unitPrice * i.quantity, 0)
-        return { ...prev, items, total }
-      })
+      await api.post(`/orders/${orderId}/items`, { productId: product.id, quantity })
     } catch (err) {
-      setActiveOrder(prevOrder)
-      setProducts(prevProducts)
       toast.error(apiMessage(err, "No se pudo agregar el producto."))
     } finally {
+      inFlight.current -= 1
+      if (inFlight.current === 0) await syncFromServer(orderId)
       setPending(n => n - 1)
     }
   }
@@ -266,14 +284,18 @@ export default function TablesPage() {
   }
 
   const closeOrder = async () => {
-    if (!activeOrder || !selectedTable || !paymentMethod || submitting || pending > 0) return
+    if (!activeOrder || !selectedTable || !paymentMethod || !paymentValid || submitting || pending > 0) return
     setSubmitting(true)
     // se arma antes de cerrar, con la comanda todavía abierta
     const ticket = canPrint && printer.settings.autoPrint && printer.status === "ready"
-      ? receiptOps("pago", { paymentMethod, tip: tipAmount })
+      ? receiptOps("pago", { paymentMethod: paymentLabel, tip: tipAmount })
       : null
     try {
-      await api.patch(`/orders/${activeOrder.id}/close`, { paymentMethod, tip: tipAmount })
+      await api.patch(`/orders/${activeOrder.id}/close`, {
+        paymentMethod,
+        tip: tipAmount,
+        ...(isMixed ? { cashAmount: cashPaid, transferMethod } : {}),
+      })
       toast.success(`Mesa ${selectedTable.number} cerrada · ${cop(activeOrder.total + tipAmount)}`)
       resetComanda()
       if (ticket) printer.print(ticket).catch(reportPrintError)
@@ -375,7 +397,24 @@ export default function TablesPage() {
   const subtotal = activeOrder?.total ?? 0
   const itemCount = activeOrder?.items?.reduce((n, i) => n + i.quantity, 0) ?? 0
   const totalWithTip = subtotal + tipAmount
-  const tenPercent = Math.round((subtotal * 0.1) / 100) * 100
+  // al cobrar, la propina del 10% ya queda puesta; se puede quitar o cambiar
+  const openPayment = () => {
+    setTipAmount(tenPercent)
+    setTipText("")
+    setShowPayment(true)
+  }
+  const pickTip = (amount: number) => {
+    setTipAmount(amount)
+    setTipText("")
+  }
+  const isMixed = paymentMethod === "Mixto"
+  const transferPart = Math.max(subtotal - cashPaid, 0)
+  // en el mixto el efectivo va entre 0 y el total, y hay que decir por dónde se pagó el resto
+  const paymentValid = !isMixed || (cashPaid > 0 && cashPaid < subtotal && transferMethod !== "")
+  const paymentLabel = isMixed
+    ? `Efectivo ${cop(cashPaid)} + ${transferMethod || "transferencia"} ${cop(transferPart)}`
+    : paymentMethod
+  const tenPercent = suggestedTip(subtotal)
 
   const categories = useMemo(() => {
     const names = new Set<string>()
@@ -678,7 +717,7 @@ export default function TablesPage() {
                 <div className="mt-5 flex flex-col gap-4">
                   <div>
                     <h3 className="mb-2 font-display text-base font-bold">Método de pago</h3>
-                    <div className="grid grid-cols-3 gap-2">
+                    <div className="grid grid-cols-2 gap-2">
                       {PAYMENT_METHODS.map(method => (
                         <button
                           key={method}
@@ -693,27 +732,52 @@ export default function TablesPage() {
                         </button>
                       ))}
                     </div>
+
+                    {isMixed && (
+                      <div className="mt-3 flex flex-col gap-3 rounded-lg bg-surface-2 p-3">
+                        <label className="flex flex-col gap-1.5">
+                          <span className="text-sm font-semibold">Pagó en efectivo</span>
+                          <Input
+                            type="number"
+                            inputMode="numeric"
+                            min={0}
+                            value={cashPaid === 0 ? "" : cashPaid}
+                            onChange={e => setCashPaid(Math.max(0, Number(e.target.value)))}
+                            placeholder="Valor en efectivo"
+                          />
+                        </label>
+                        <div className="flex items-center justify-between text-[15px]">
+                          <span className="text-soft">El resto, por transferencia</span>
+                          <span className="font-bold tnum">{cop(transferPart)}</span>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          {TRANSFER_METHODS.map(method => (
+                            <button
+                              key={method}
+                              onClick={() => setTransferMethod(method)}
+                              aria-pressed={transferMethod === method}
+                              className={cn(
+                                "h-11 rounded-md text-sm font-semibold transition-colors",
+                                transferMethod === method ? "bg-brand text-brand-ink" : "bg-surface text-soft hover:text-ink"
+                              )}
+                            >
+                              {method}
+                            </button>
+                          ))}
+                        </div>
+                        {cashPaid >= subtotal && cashPaid > 0 && (
+                          <p className="text-sm text-warn">El efectivo debe ser menor al total. Si pagó todo en efectivo, elige «Efectivo».</p>
+                        )}
+                      </div>
+                    )}
                   </div>
 
                   <div>
                     <h3 className="mb-2 font-display text-base font-bold">Propina</h3>
                     <div className="grid grid-cols-3 gap-2">
-                      {TIP_PRESETS.map(amount => (
-                        <button
-                          key={amount}
-                          onClick={() => setTipAmount(amount)}
-                          aria-pressed={tipAmount === amount}
-                          className={cn(
-                            "h-11 rounded-md text-sm font-semibold transition-colors",
-                            tipAmount === amount ? "bg-brand text-brand-ink" : "bg-surface-2 text-soft hover:text-ink"
-                          )}
-                        >
-                          {amount === 0 ? "Sin propina" : cop(amount)}
-                        </button>
-                      ))}
                       {tenPercent > 0 && (
                         <button
-                          onClick={() => setTipAmount(tenPercent)}
+                          onClick={() => pickTip(tenPercent)}
                           aria-pressed={tipAmount === tenPercent}
                           className={cn(
                             "h-11 rounded-md text-sm font-semibold transition-colors",
@@ -723,13 +787,29 @@ export default function TablesPage() {
                           10% · {cop(tenPercent)}
                         </button>
                       )}
+                      {TIP_PRESETS.filter(amount => amount === 0 || amount !== tenPercent).map(amount => (
+                        <button
+                          key={amount}
+                          onClick={() => pickTip(amount)}
+                          aria-pressed={tipAmount === amount}
+                          className={cn(
+                            "h-11 rounded-md text-sm font-semibold transition-colors",
+                            tipAmount === amount ? "bg-brand text-brand-ink" : "bg-surface-2 text-soft hover:text-ink"
+                          )}
+                        >
+                          {amount === 0 ? "Sin propina" : cop(amount)}
+                        </button>
+                      ))}
                     </div>
                     <Input
                       type="number"
                       inputMode="numeric"
                       min={0}
-                      value={tipAmount === 0 ? "" : tipAmount}
-                      onChange={e => setTipAmount(Math.max(0, Number(e.target.value)))}
+                      value={tipText}
+                      onChange={e => {
+                        setTipText(e.target.value)
+                        setTipAmount(Math.max(0, Number(e.target.value)))
+                      }}
                       placeholder="Otro valor"
                       aria-label="Valor de propina personalizado"
                       className="mt-2"
@@ -759,7 +839,7 @@ export default function TablesPage() {
 
               {!showPayment ? (
                 <>
-                  <Button size="lg" disabled={!activeOrder?.items?.length || pending > 0} onClick={() => setShowPayment(true)}>
+                  <Button size="lg" disabled={!activeOrder?.items?.length || pending > 0} onClick={openPayment}>
                     <CheckCircle2 size={19} /> Cerrar cuenta
                   </Button>
                   {canPrint && (
@@ -782,7 +862,7 @@ export default function TablesPage() {
                     size="lg"
                     variant="success"
                     loading={submitting}
-                    disabled={!paymentMethod || pending > 0}
+                    disabled={!paymentMethod || !paymentValid || pending > 0}
                     onClick={closeOrder}
                   >
                     <CheckCircle2 size={19} /> Confirmar {cop(totalWithTip)}

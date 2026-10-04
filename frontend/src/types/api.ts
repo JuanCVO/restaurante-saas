@@ -65,6 +65,8 @@ export type Order = {
   tip: number | null
   status: OrderStatus
   paymentMethod: string | null
+  cashAmount?: number | null
+  transferMethod?: string | null
   restaurantId: string
   userId: string
   tableId: string | null
@@ -120,10 +122,12 @@ export type DailySummary = {
   totalGastos: number
   totalPagosEmpleados: number
   totalCompras?: number
+  comprasEfectivo?: number
+  gastosEfectivo?: number
   propinasEntregadas?: number
   baseCaja: number
   efectivo: number
-  datafono: number
+  bancolombia: number
   nequi: number
   restaurantId: string
   createdAt: string
@@ -138,7 +142,7 @@ export type SummaryChart = {
   propinas: number
   baseCaja: number
   efectivo: number
-  datafono: number
+  bancolombia: number
   nequi: number
 }
 

@@ -76,7 +76,7 @@ export const getSummaryChart = asyncHandler(async (req: Request, res: Response) 
       propinas:  item.totalPropinas ?? 0,
       baseCaja:  item.baseCaja ?? 0,
       efectivo:  item.efectivo,
-      datafono:  item.datafono,
+      bancolombia: item.bancolombia,
       nequi:     item.nequi,
     }
   })

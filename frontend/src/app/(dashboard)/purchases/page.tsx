@@ -268,7 +268,7 @@ export default function PurchasesPage() {
                 <Select value={paymentMethod} onChange={e => setPaymentMethod(e.target.value)}>
                   <option value="Efectivo">Efectivo</option>
                   <option value="Nequi">Nequi</option>
-                  <option value="Datafono">Datafono</option>
+                  <option value="Bancolombia">Bancolombia</option>
                 </Select>
               </Field>
               <Field label="Concepto" className="sm:col-span-2">

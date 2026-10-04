@@ -103,6 +103,8 @@ model Order {
   tip           Float       @default(0)
   status       OrderStatus @default(ABIERTA)
   paymentMethod String?
+  cashAmount   Float?
+  transferMethod String?
   restaurantId String
   restaurant   Restaurant  @relation(fields: [restaurantId], references: [id])
   userId       String
@@ -147,12 +149,14 @@ model DailySummary {
   totalOrdenes    Int
   totalPlatos     Int
   efectivo        Float    @default(0)
-  datafono        Float    @default(0)
+  bancolombia     Float    @default(0)
   nequi           Float    @default(0)
   totalPropinas       Float    @default(0)
   totalGastos         Float    @default(0)
   totalPagosEmpleados Float    @default(0)
   totalCompras        Float    @default(0)
+  comprasEfectivo     Float    @default(0)
+  gastosEfectivo      Float    @default(0)
   propinasEntregadas  Float    @default(0)
   baseCaja            Float    @default(0)
   restaurantId        String

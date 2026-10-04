@@ -22,7 +22,7 @@ import { useToast } from "@/components/ui/toast"
 type Metric = "ventas" | "neto" | "pedidos"
 type Period = "week" | "month"
 
-const PAY_TONE = { Efectivo: "good", Datafono: "warn", Nequi: "brand" } as const
+const PAY_TONE = { Efectivo: "good", Bancolombia: "warn", Datafono: "warn", Nequi: "brand", Mixto: "soft" } as const
 
 const METRICS: { value: Metric; label: string }[] = [
   { value: "ventas", label: "Ventas" },
@@ -133,7 +133,7 @@ export default function DashboardPage() {
 
   const bars = useMemo(() => chartData.map(d => {
     const [, month, day] = d.date.slice(0, 10).split("-")
-    const value = metric === "ventas" ? d.efectivo + d.datafono + d.nequi : metric === "neto" ? d.ingresos : d.pedidos
+    const value = metric === "ventas" ? d.efectivo + d.bancolombia + d.nequi : metric === "neto" ? d.ingresos : d.pedidos
     return { label: `${day}/${month}`, value }
   }), [chartData, metric])
 

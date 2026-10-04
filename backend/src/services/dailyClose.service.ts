@@ -4,6 +4,8 @@ import { colombiaDayStart } from "../lib/date"
 import { getOpenPeriod, closedSince } from "../lib/period"
 import { BusinessError } from "../lib/errors"
 import { env } from "../lib/env"
+import { lockClose } from "../lib/locks"
+import { sumPayments } from "../lib/payments"
 
 export type CloseDayResult =
   | { kind: "created"; summary: DailySummary }
@@ -14,6 +16,9 @@ export type CloseDayResult =
 // Las propinas van aparte: no cuentan como ingreso.
 export const closeDayForRestaurant = async (restaurantId: string): Promise<CloseDayResult> => {
   return prisma.$transaction(async (tx) => {
+    // dos cierres a la vez (doble clic, dos dispositivos) no se pisan: el segundo espera y ya no encuentra nada
+    await lockClose(tx, restaurantId, "exclusive")
+
     const { from } = await getOpenPeriod(restaurantId, tx)
     const after = { gt: from }
 
@@ -22,10 +27,12 @@ export const closeDayForRestaurant = async (restaurantId: string): Promise<Close
       include: { items: { select: { quantity: true } } },
     })
 
-    const [baseAgg, gastosAgg, comprasAgg, pagosAgg, firstMovement, firstPayment] = await Promise.all([
+    const [baseAgg, gastosAgg, comprasAgg, gastosEfAgg, comprasEfAgg, pagosAgg, firstMovement, firstPayment] = await Promise.all([
       tx.cashMovement.aggregate({ where: { restaurantId, type: "BASE_CAJA", createdAt: after }, _sum: { amount: true } }),
       tx.cashMovement.aggregate({ where: { restaurantId, type: "GASTO", createdAt: after }, _sum: { amount: true } }),
       tx.cashMovement.aggregate({ where: { restaurantId, type: "COMPRA", createdAt: after }, _sum: { amount: true } }),
+      tx.cashMovement.aggregate({ where: { restaurantId, type: "GASTO", paymentMethod: "Efectivo", createdAt: after }, _sum: { amount: true } }),
+      tx.cashMovement.aggregate({ where: { restaurantId, type: "COMPRA", paymentMethod: "Efectivo", createdAt: after }, _sum: { amount: true } }),
       tx.employeePayment.aggregate({ where: { restaurantId, createdAt: after }, _sum: { salary: true, tip: true } }),
       tx.cashMovement.findFirst({ where: { restaurantId, createdAt: after }, orderBy: { createdAt: "asc" }, select: { createdAt: true } }),
       tx.employeePayment.findFirst({ where: { restaurantId, createdAt: after }, orderBy: { createdAt: "asc" }, select: { createdAt: true } }),
@@ -34,6 +41,8 @@ export const closeDayForRestaurant = async (restaurantId: string): Promise<Close
     const baseCaja            = baseAgg._sum.amount ?? 0
     const totalGastos         = gastosAgg._sum.amount ?? 0
     const totalCompras        = comprasAgg._sum.amount ?? 0
+    const gastosEfectivo      = gastosEfAgg._sum.amount ?? 0
+    const comprasEfectivo     = comprasEfAgg._sum.amount ?? 0
     const totalPagosEmpleados = pagosAgg._sum.salary ?? 0
     const propinasEntregadas  = pagosAgg._sum.tip ?? 0
 
@@ -49,8 +58,7 @@ export const closeDayForRestaurant = async (restaurantId: string): Promise<Close
     ].filter((t): t is number => typeof t === "number")
     const date = colombiaDayStart(new Date(moments.length ? Math.min(...moments) : Date.now()))
 
-    const sumBy = (method: string) =>
-      orders.filter(o => o.paymentMethod === method).reduce((s, o) => s + o.total, 0)
+    const porMedio = sumPayments(orders)
     const ventas = orders.reduce((s, o) => s + o.total, 0)
 
     const data = {
@@ -58,11 +66,13 @@ export const closeDayForRestaurant = async (restaurantId: string): Promise<Close
       totalOrdenes:  orders.length,
       totalPlatos:   orders.reduce((s, o) => s + o.items.reduce((q, i) => q + i.quantity, 0), 0),
       totalPropinas: orders.reduce((s, o) => s + (o.tip ?? 0), 0),
-      efectivo: sumBy("Efectivo"),
-      datafono: sumBy("Datafono"),
-      nequi:    sumBy("Nequi"),
+      efectivo:    porMedio.efectivo,
+      bancolombia: porMedio.bancolombia,
+      nequi:       porMedio.nequi,
       totalGastos,
       totalCompras,
+      gastosEfectivo,
+      comprasEfectivo,
       totalPagosEmpleados,
       propinasEntregadas,
       baseCaja,
@@ -81,10 +91,12 @@ export const closeDayForRestaurant = async (restaurantId: string): Promise<Close
             totalPlatos:         { increment: data.totalPlatos },
             totalPropinas:       { increment: data.totalPropinas },
             efectivo:            { increment: data.efectivo },
-            datafono:            { increment: data.datafono },
+            bancolombia:         { increment: data.bancolombia },
             nequi:               { increment: data.nequi },
             totalGastos:         { increment: data.totalGastos },
             totalCompras:        { increment: data.totalCompras },
+            gastosEfectivo:      { increment: data.gastosEfectivo },
+            comprasEfectivo:     { increment: data.comprasEfectivo },
             totalPagosEmpleados: { increment: data.totalPagosEmpleados },
             propinasEntregadas:  { increment: data.propinasEntregadas },
             baseCaja:            { increment: data.baseCaja },

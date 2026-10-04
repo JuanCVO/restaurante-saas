@@ -25,8 +25,13 @@ const fmtDate = (d: Date) =>
     day: "2-digit", month: "2-digit", year: "numeric", hour: "numeric", minute: "2-digit", timeZone: "America/Bogota",
   })
 
-// 10 % redondeado a la centena
-export const suggestedTip = (subtotal: number) => Math.round((subtotal * 0.1) / 100) * 100
+// Propina cercana al 10 % que deja el TOTAL en billetes (múltiplo de 1.000), para no dar vueltos en monedas:
+// 53.500 -> 5.500 (total 59.000), 15.500 -> 1.500 (total 17.000). Si el total queda justo entre dos billetes,
+// se baja (155.000 -> 15.000). Todo con enteros, para que no estorben los decimales.
+export const suggestedTip = (subtotal: number) => {
+  const total = Math.ceil((subtotal * 11 - 5000) / 10000) * 1000
+  return Math.max(total - subtotal, 0)
+}
 
 export const buildReceipt = (d: ReceiptData): Op[] => {
   const ops: Op[] = []
@@ -54,8 +59,10 @@ export const buildReceipt = (d: ReceiptData): Op[] => {
   } else {
     const tip = suggestedTip(d.subtotal)
     ops.push({ t: "row", left: "TOTAL", right: cop(d.subtotal), bold: true, big: true })
-    ops.push({ t: "text", text: `Propina voluntaria sugerida (10%): ${cop(tip)}` })
-    ops.push({ t: "text", text: `Total con propina: ${cop(d.subtotal + tip)}` })
+    if (tip > 0) {
+      ops.push({ t: "text", text: `Propina voluntaria sugerida (10%): ${cop(tip)}` })
+      ops.push({ t: "text", text: `Total con propina: ${cop(d.subtotal + tip)}` })
+    }
   }
 
   ops.push({ t: "rule" })

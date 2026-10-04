@@ -41,17 +41,28 @@ test("row con producto largo mantiene el precio en la primera línea", () => {
   assert.ok(lines.every(l => l.length <= 42))
 })
 
-test("propina sugerida: 10% redondeado a la centena", () => {
-  assert.equal(suggestedTip(105500), 10600)
-  assert.equal(suggestedTip(76000), 7600)
-  assert.equal(suggestedTip(4000), 400)
+test("propina sugerida: cerca del 10% y con el total en billetes", () => {
+  const casos: [number, number][] = [
+    [53500, 5500],   // total 59.000
+    [15500, 1500],   // total 17.000
+    [145500, 14500], // total 160.000
+    [155000, 15000], // 170.500 queda entre dos billetes: se baja
+    [150000, 15000],
+    [105500, 10500],
+    [76000, 8000],
+    [4000, 0],
+  ]
+  for (const [subtotal, tip] of casos) {
+    assert.equal(suggestedTip(subtotal), tip, `subtotal ${subtotal}`)
+    assert.equal((subtotal + tip) % 1000, 0, `el total de ${subtotal} debe ser en billetes`)
+  }
 })
 
 test("tiquete de prueba cabe en 42 y en 48 columnas", () => {
   const ops = buildTestReceipt("La Fogata", "")
   const at42 = renderPlain(ops, { cols: 42 })
   assert.ok(at42.split("\n").every(l => l.length <= 42))
-  assert.ok(at42.includes("$105.500") && at42.includes("$10.600") && at42.includes("$116.100"))
+  assert.ok(at42.includes("$105.500") && at42.includes("$10.500") && at42.includes("$116.000"))
 
   const at48 = renderPlain(ops, { cols: 48 })
   assert.ok(at48.split("\n").every(l => l.length <= 48))

@@ -5,9 +5,21 @@ import { asyncHandler } from "../lib/asyncHandler"
 import { BusinessError } from "../lib/errors"
 import { getOpenPeriod, closedSince } from "../lib/period"
 import { audit } from "../lib/audit"
+import { lockClose } from "../lib/locks"
+import type { Prisma } from "@prisma/client"
 
 // 5 s se quedan cortos cuando la base está en otra región
 const TX = { timeout: 20_000, maxWait: 10_000 }
+
+// Toma la orden (la bloquea hasta terminar la transacción) solo si sigue abierta. Si otra petición la cerró o
+// la canceló un instante antes, esta falla en vez de repetir el efecto (devolver el stock dos veces, etc.).
+const lockOpenOrder = async (tx: Prisma.TransactionClient, id: string) => {
+  const taken = await tx.order.updateMany({
+    where: { id, status: "ABIERTA" },
+    data: { total: { increment: 0 } },
+  })
+  if (taken.count === 0) throw new BusinessError("ORDER_NOT_OPEN", 409)
+}
 
 export const createOrder = asyncHandler(async (req: Request, res: Response) => {
   const data = CreateOrderSchema.parse(req.body)
@@ -85,6 +97,8 @@ export const addItemToOrder = asyncHandler(async (req: Request, res: Response) =
   if (order.status !== "ABIERTA") throw new BusinessError("ORDER_NOT_OPEN", 409)
 
   const item = await prisma.$transaction(async (tx) => {
+    await lockOpenOrder(tx, id)
+
     const product = await tx.product.findUnique({ where: { id: productId } })
     if (!product) throw new BusinessError("PRODUCT_NOT_FOUND", 404)
     if (product.restaurantId !== order.restaurantId) {
@@ -130,7 +144,8 @@ export const addItemToOrder = asyncHandler(async (req: Request, res: Response) =
 
 export const closeOrder = asyncHandler(async (req: Request, res: Response) => {
   const id = req.params.id as string
-  const { paymentMethod, tip = 0 } = CloseOrderSchema.parse(req.body)
+  const { paymentMethod, tip = 0, cashAmount, transferMethod } = CloseOrderSchema.parse(req.body)
+  const mixed = paymentMethod === "Mixto"
 
   const existing = await prisma.order.findUnique({
     where: { id },
@@ -144,11 +159,28 @@ export const closeOrder = asyncHandler(async (req: Request, res: Response) => {
   if (existing._count.items === 0) throw new BusinessError("ORDER_EMPTY", 400)
 
   const order = await prisma.$transaction(async (tx) => {
-    const updated = await tx.order.update({
+    // espera a que termine un cierre de día en curso; así closedAt siempre cae en el periodo correcto
+    await lockClose(tx, existing.restaurantId, "shared")
+
+    const closed = await tx.order.updateMany({
+      where: { id, restaurantId: existing.restaurantId, status: "ABIERTA" },
+      data: {
+        status: "CERRADA", paymentMethod, tip, closedAt: new Date(),
+        cashAmount: mixed ? cashAmount : null,
+        transferMethod: mixed ? transferMethod : null,
+      },
+    })
+    if (closed.count === 0) throw new BusinessError("ORDER_NOT_OPEN", 409)
+
+    const updated = await tx.order.findUniqueOrThrow({
       where: { id },
-      data: { status: "CERRADA", paymentMethod, tip, closedAt: new Date() },
       include: { items: { include: { product: true } }, table: true },
     })
+    if (updated.items.length === 0) throw new BusinessError("ORDER_EMPTY", 400)
+    // el total se confirma ya con la orden bloqueada; si no cuadra, no se cobra nada
+    if (mixed && (cashAmount === undefined || !transferMethod || cashAmount <= 0 || cashAmount >= updated.total)) {
+      throw new BusinessError("INVALID_SPLIT", 400)
+    }
     if (updated.tableId) {
       await tx.table.update({
         where: { id: updated.tableId },
@@ -166,7 +198,7 @@ export const cancelOrder = asyncHandler(async (req: Request, res: Response) => {
 
   const order = await prisma.order.findUnique({
     where: { id },
-    include: { items: { select: { productId: true, quantity: true } } },
+    select: { restaurantId: true, tableId: true, status: true },
   })
   if (!order) throw new BusinessError("ORDER_NOT_FOUND", 404)
   if (order.restaurantId !== req.user?.restaurantId) {
@@ -174,20 +206,30 @@ export const cancelOrder = asyncHandler(async (req: Request, res: Response) => {
   }
   if (order.status !== "ABIERTA") throw new BusinessError("ORDER_NOT_OPEN", 409)
 
-  await prisma.$transaction(async (tx) => {
-    for (const item of order.items) {
+  const restocked = await prisma.$transaction(async (tx) => {
+    await lockOpenOrder(tx, id)
+    await tx.order.update({ where: { id }, data: { status: "CANCELADA" } })
+
+    // los productos se leen ya con la orden bloqueada, así no se devuelve de más ni de menos
+    // siempre en el mismo orden, para que dos cancelaciones a la vez no se bloqueen entre sí
+    const items = await tx.orderItem.findMany({
+      where: { orderId: id },
+      select: { productId: true, quantity: true },
+      orderBy: { productId: "asc" },
+    })
+    for (const item of items) {
       await tx.product.update({
         where: { id: item.productId },
         data: { stock: { increment: item.quantity } },
       })
     }
-    await tx.order.update({ where: { id }, data: { status: "CANCELADA" } })
     if (order.tableId) {
       await tx.table.update({ where: { id: order.tableId }, data: { status: "DISPONIBLE" } })
     }
+    return items.length
   }, TX)
 
-  audit(req, "order.cancel", { orderId: id, items: order.items.length })
+  audit(req, "order.cancel", { orderId: id, items: restocked })
   return res.json({ message: "Orden cancelada" })
 })
 
@@ -205,10 +247,16 @@ export const removeItemFromOrder = asyncHandler(async (req: Request, res: Respon
   if (item.order.status !== "ABIERTA") throw new BusinessError("ORDER_NOT_OPEN", 409)
 
   await prisma.$transaction(async (tx) => {
+    await lockOpenOrder(tx, item.orderId)
+
+    // se vuelve a leer con la orden bloqueada: si otro ya lo quitó, no se devuelve el stock otra vez
+    const current = await tx.orderItem.findUnique({ where: { id: itemId }, select: { productId: true, quantity: true } })
+    if (!current) throw new BusinessError("RESOURCE_NOT_FOUND", 404)
+
     await tx.orderItem.delete({ where: { id: itemId } })
     await tx.product.update({
-      where: { id: item.productId },
-      data: { stock: { increment: item.quantity } },
+      where: { id: current.productId },
+      data: { stock: { increment: current.quantity } },
     })
     const allItems = await tx.orderItem.findMany({ where: { orderId: item.orderId } })
     const total = allItems.reduce((sum, i) => sum + i.unitPrice * i.quantity, 0)
