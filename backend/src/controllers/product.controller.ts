@@ -2,12 +2,12 @@ import { Request, Response } from "express"
 import { prisma } from "../lib/prisma"
 import { ProductSchema, ProductUpdateSchema } from "../lib/validators"
 import { asyncHandler } from "../lib/asyncHandler"
-import { BusinessError } from "../lib/errors"
+import { BusinessError, HTTP } from "../lib/errors"
 import { audit } from "../lib/audit"
 
 const assertCategoryBelongsTo = async (categoryId: string, restaurantId?: string) => {
   const category = await prisma.category.findUnique({ where: { id: categoryId }, select: { restaurantId: true } })
-  if (!category || category.restaurantId !== restaurantId) throw new BusinessError("FORBIDDEN", 403)
+  if (!category || category.restaurantId !== restaurantId) throw new BusinessError("FORBIDDEN")
 }
 
 export const getProducts = asyncHandler(async (req: Request, res: Response) => {
@@ -24,7 +24,7 @@ export const createProduct = asyncHandler(async (req: Request, res: Response) =>
   const data = ProductSchema.parse(req.body)
   await assertCategoryBelongsTo(data.categoryId, data.restaurantId)
   const product = await prisma.product.create({ data, include: { category: true } })
-  return res.status(201).json(product)
+  return res.status(HTTP.CREATED).json(product)
 })
 
 export const updateProduct = asyncHandler(async (req: Request, res: Response) => {

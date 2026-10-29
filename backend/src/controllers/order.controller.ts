@@ -1,30 +1,30 @@
 import { Request, Response } from "express"
-import { prisma } from "../lib/prisma"
+import { prisma, type Tx } from "../lib/prisma"
 import { CreateOrderSchema, AddItemSchema, CloseOrderSchema } from "../lib/validators"
 import { asyncHandler } from "../lib/asyncHandler"
-import { BusinessError } from "../lib/errors"
+import { BusinessError, HTTP } from "../lib/errors"
 import { getOpenPeriod, closedSince } from "../lib/period"
 import { audit } from "../lib/audit"
 import { lockClose } from "../lib/locks"
-import type { Prisma } from "@prisma/client"
+import { getTenantConfig } from "../lib/tenantConfig"
 
 // 5 s se quedan cortos cuando la base está en otra región
 const TX = { timeout: 20_000, maxWait: 10_000 }
 
 // Toma la orden (la bloquea hasta terminar la transacción) solo si sigue abierta. Si otra petición la cerró o
 // la canceló un instante antes, esta falla en vez de repetir el efecto (devolver el stock dos veces, etc.).
-const lockOpenOrder = async (tx: Prisma.TransactionClient, id: string) => {
+const lockOpenOrder = async (tx: Tx, id: string) => {
   const taken = await tx.order.updateMany({
     where: { id, status: "ABIERTA" },
     data: { total: { increment: 0 } },
   })
-  if (taken.count === 0) throw new BusinessError("ORDER_NOT_OPEN", 409)
+  if (taken.count === 0) throw new BusinessError("ORDER_NOT_OPEN")
 }
 
 export const createOrder = asyncHandler(async (req: Request, res: Response) => {
   const data = CreateOrderSchema.parse(req.body)
   const userId = req.user?.userId
-  if (!userId) throw new BusinessError("FORBIDDEN", 401)
+  if (!userId) throw new BusinessError("UNAUTHENTICATED")
 
   if (data.tableId) {
     const table = await prisma.table.findUnique({
@@ -32,7 +32,7 @@ export const createOrder = asyncHandler(async (req: Request, res: Response) => {
       select: { restaurantId: true },
     })
     if (!table || table.restaurantId !== data.restaurantId) {
-      throw new BusinessError("FORBIDDEN", 403)
+      throw new BusinessError("FORBIDDEN")
     }
   }
 
@@ -41,7 +41,7 @@ export const createOrder = asyncHandler(async (req: Request, res: Response) => {
       where: { tableId: data.tableId, restaurantId: data.restaurantId, status: "ABIERTA" },
       include: { items: { include: { product: true } } },
     })
-    if (open) return res.status(200).json(open)
+    if (open) return res.status(HTTP.OK).json(open)
   }
 
   const order = await prisma.order.create({
@@ -54,7 +54,7 @@ export const createOrder = asyncHandler(async (req: Request, res: Response) => {
     },
   })
 
-  return res.status(201).json(order)
+  return res.status(HTTP.CREATED).json(order)
 })
 
 export const getOrderById = asyncHandler(async (req: Request, res: Response) => {
@@ -63,9 +63,9 @@ export const getOrderById = asyncHandler(async (req: Request, res: Response) => 
     where: { id },
     include: { items: { include: { product: true } }, table: true },
   })
-  if (!order) throw new BusinessError("ORDER_NOT_FOUND", 404)
+  if (!order) throw new BusinessError("ORDER_NOT_FOUND")
   if (order.restaurantId !== req.user?.restaurantId) {
-    throw new BusinessError("FORBIDDEN", 403)
+    throw new BusinessError("FORBIDDEN")
   }
   return res.json(order)
 })
@@ -77,7 +77,7 @@ export const getActiveOrderByTable = asyncHandler(async (req: Request, res: Resp
     include: { items: { include: { product: true } } },
   })
   if (order && order.restaurantId !== req.user?.restaurantId) {
-    throw new BusinessError("FORBIDDEN", 403)
+    throw new BusinessError("FORBIDDEN")
   }
   return res.json(order)
 })
@@ -90,19 +90,19 @@ export const addItemToOrder = asyncHandler(async (req: Request, res: Response) =
     where: { id },
     select: { restaurantId: true, tableId: true, status: true },
   })
-  if (!order) throw new BusinessError("ORDER_NOT_FOUND", 404)
+  if (!order) throw new BusinessError("ORDER_NOT_FOUND")
   if (order.restaurantId !== req.user?.restaurantId) {
-    throw new BusinessError("FORBIDDEN", 403)
+    throw new BusinessError("FORBIDDEN")
   }
-  if (order.status !== "ABIERTA") throw new BusinessError("ORDER_NOT_OPEN", 409)
+  if (order.status !== "ABIERTA") throw new BusinessError("ORDER_NOT_OPEN")
 
   const item = await prisma.$transaction(async (tx) => {
     await lockOpenOrder(tx, id)
 
     const product = await tx.product.findUnique({ where: { id: productId } })
-    if (!product) throw new BusinessError("PRODUCT_NOT_FOUND", 404)
+    if (!product) throw new BusinessError("PRODUCT_NOT_FOUND")
     if (product.restaurantId !== order.restaurantId) {
-      throw new BusinessError("PRODUCT_FOREIGN", 403)
+      throw new BusinessError("PRODUCT_FOREIGN")
     }
 
     // descuento atómico: si dos meseros piden lo último, solo uno lo consigue
@@ -112,7 +112,7 @@ export const addItemToOrder = asyncHandler(async (req: Request, res: Response) =
     })
     if (decremented.count === 0) {
       const current = await tx.product.findUnique({ where: { id: productId }, select: { stock: true } })
-      throw new BusinessError("INSUFFICIENT_STOCK", 400, { available: current?.stock ?? 0 })
+      throw new BusinessError("INSUFFICIENT_STOCK", { available: current?.stock ?? 0 })
     }
 
     const existing = await tx.orderItem.findFirst({ where: { orderId: id, productId } })
@@ -139,7 +139,7 @@ export const addItemToOrder = asyncHandler(async (req: Request, res: Response) =
     return saved
   }, TX)
 
-  return res.status(201).json(item)
+  return res.status(HTTP.CREATED).json(item)
 })
 
 export const closeOrder = asyncHandler(async (req: Request, res: Response) => {
@@ -147,16 +147,23 @@ export const closeOrder = asyncHandler(async (req: Request, res: Response) => {
   const { paymentMethod, tip = 0, cashAmount, transferMethod } = CloseOrderSchema.parse(req.body)
   const mixed = paymentMethod === "Mixto"
 
+  const restaurantId = req.user?.restaurantId
+  if (!restaurantId) throw new BusinessError("UNAUTHENTICATED")
+  const { paymentMethods } = (await getTenantConfig(restaurantId)).settings
+  if (!paymentMethods.includes(paymentMethod) || (mixed && transferMethod && !paymentMethods.includes(transferMethod))) {
+    throw new BusinessError("PAYMENT_METHOD_DISABLED")
+  }
+
   const existing = await prisma.order.findUnique({
     where: { id },
     select: { restaurantId: true, status: true, _count: { select: { items: true } } },
   })
-  if (!existing) throw new BusinessError("ORDER_NOT_FOUND", 404)
+  if (!existing) throw new BusinessError("ORDER_NOT_FOUND")
   if (existing.restaurantId !== req.user?.restaurantId) {
-    throw new BusinessError("FORBIDDEN", 403)
+    throw new BusinessError("FORBIDDEN")
   }
-  if (existing.status !== "ABIERTA") throw new BusinessError("ORDER_NOT_OPEN", 409)
-  if (existing._count.items === 0) throw new BusinessError("ORDER_EMPTY", 400)
+  if (existing.status !== "ABIERTA") throw new BusinessError("ORDER_NOT_OPEN")
+  if (existing._count.items === 0) throw new BusinessError("ORDER_EMPTY")
 
   const order = await prisma.$transaction(async (tx) => {
     // espera a que termine un cierre de día en curso; así closedAt siempre cae en el periodo correcto
@@ -170,16 +177,16 @@ export const closeOrder = asyncHandler(async (req: Request, res: Response) => {
         transferMethod: mixed ? transferMethod : null,
       },
     })
-    if (closed.count === 0) throw new BusinessError("ORDER_NOT_OPEN", 409)
+    if (closed.count === 0) throw new BusinessError("ORDER_NOT_OPEN")
 
     const updated = await tx.order.findUniqueOrThrow({
       where: { id },
       include: { items: { include: { product: true } }, table: true },
     })
-    if (updated.items.length === 0) throw new BusinessError("ORDER_EMPTY", 400)
+    if (updated.items.length === 0) throw new BusinessError("ORDER_EMPTY")
     // el total se confirma ya con la orden bloqueada; si no cuadra, no se cobra nada
     if (mixed && (cashAmount === undefined || !transferMethod || cashAmount <= 0 || cashAmount >= updated.total)) {
-      throw new BusinessError("INVALID_SPLIT", 400)
+      throw new BusinessError("INVALID_SPLIT")
     }
     if (updated.tableId) {
       await tx.table.update({
@@ -200,11 +207,11 @@ export const cancelOrder = asyncHandler(async (req: Request, res: Response) => {
     where: { id },
     select: { restaurantId: true, tableId: true, status: true },
   })
-  if (!order) throw new BusinessError("ORDER_NOT_FOUND", 404)
+  if (!order) throw new BusinessError("ORDER_NOT_FOUND")
   if (order.restaurantId !== req.user?.restaurantId) {
-    throw new BusinessError("FORBIDDEN", 403)
+    throw new BusinessError("FORBIDDEN")
   }
-  if (order.status !== "ABIERTA") throw new BusinessError("ORDER_NOT_OPEN", 409)
+  if (order.status !== "ABIERTA") throw new BusinessError("ORDER_NOT_OPEN")
 
   const restocked = await prisma.$transaction(async (tx) => {
     await lockOpenOrder(tx, id)
@@ -240,18 +247,18 @@ export const removeItemFromOrder = asyncHandler(async (req: Request, res: Respon
     where: { id: itemId },
     include: { order: { select: { restaurantId: true, status: true, tableId: true } } },
   })
-  if (!item) throw new BusinessError("RESOURCE_NOT_FOUND", 404)
+  if (!item) throw new BusinessError("RESOURCE_NOT_FOUND")
   if (item.order.restaurantId !== req.user?.restaurantId) {
-    throw new BusinessError("FORBIDDEN", 403)
+    throw new BusinessError("FORBIDDEN")
   }
-  if (item.order.status !== "ABIERTA") throw new BusinessError("ORDER_NOT_OPEN", 409)
+  if (item.order.status !== "ABIERTA") throw new BusinessError("ORDER_NOT_OPEN")
 
   await prisma.$transaction(async (tx) => {
     await lockOpenOrder(tx, item.orderId)
 
     // se vuelve a leer con la orden bloqueada: si otro ya lo quitó, no se devuelve el stock otra vez
     const current = await tx.orderItem.findUnique({ where: { id: itemId }, select: { productId: true, quantity: true } })
-    if (!current) throw new BusinessError("RESOURCE_NOT_FOUND", 404)
+    if (!current) throw new BusinessError("RESOURCE_NOT_FOUND")
 
     await tx.orderItem.delete({ where: { id: itemId } })
     await tx.product.update({

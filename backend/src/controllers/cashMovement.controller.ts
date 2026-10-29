@@ -2,7 +2,7 @@ import { Request, Response } from "express"
 import { prisma } from "../lib/prisma"
 import { CashMovementSchema } from "../lib/validators"
 import { asyncHandler } from "../lib/asyncHandler"
-import { BusinessError } from "../lib/errors"
+import { BusinessError, HTTP } from "../lib/errors"
 import { getOpenPeriod } from "../lib/period"
 import { audit } from "../lib/audit"
 
@@ -18,7 +18,7 @@ export const createCashMovement = asyncHandler(async (req: Request, res: Respons
         createdAt: { gt: from },
       },
     })
-    if (existingBase) throw new BusinessError("DUPLICATE_BASE_CAJA", 409)
+    if (existingBase) throw new BusinessError("DUPLICATE_BASE_CAJA")
   }
 
   const movement = await prisma.cashMovement.create({
@@ -32,7 +32,7 @@ export const createCashMovement = asyncHandler(async (req: Request, res: Respons
     },
   })
 
-  return res.status(201).json(movement)
+  return res.status(HTTP.CREATED).json(movement)
 })
 
 export const getCashMovementsByRestaurant = asyncHandler(async (req: Request, res: Response) => {

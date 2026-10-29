@@ -5,6 +5,7 @@ import { CheckCircle2, Loader2, Minus, Plus, Printer, Search, Trash2 } from "luc
 
 import api from "@/lib/axios"
 import { useCurrentUser } from "@/lib/auth"
+import { tenantSettings } from "@/lib/tenant"
 import { apiMessage } from "@/lib/errors"
 import { cop, elapsed, isToday } from "@/lib/format"
 import { cn } from "@/lib/utils"
@@ -47,6 +48,10 @@ export default function TablesPage() {
   const toast = useToast()
   const { user, token, restaurantId } = useCurrentUser()
   const isAdmin = user?.role === "ADMIN"
+  // propina sugerida y medios de pago son de cada restaurante
+  const settings = tenantSettings(user)
+  const paymentMethods = PAYMENT_METHODS.filter(m => settings.paymentMethods.includes(m))
+  const transferMethods = TRANSFER_METHODS.filter(m => settings.paymentMethods.includes(m))
   const printer = usePrinter()
   // los meseros piden desde el celular; la impresora está en la caja
   const canPrint = user?.role === "ADMIN"
@@ -256,6 +261,7 @@ export default function TablesPage() {
       items: (activeOrder.items ?? []).map(i => ({ name: i.product.name, quantity: i.quantity, unitPrice: i.unitPrice })),
       subtotal: activeOrder.total,
       footer: printer.settings.footer,
+      tipPercent: settings.tipPercent,
       ...extra,
     })
   }
@@ -397,7 +403,7 @@ export default function TablesPage() {
   const subtotal = activeOrder?.total ?? 0
   const itemCount = activeOrder?.items?.reduce((n, i) => n + i.quantity, 0) ?? 0
   const totalWithTip = subtotal + tipAmount
-  // al cobrar, la propina del 10% ya queda puesta; se puede quitar o cambiar
+  // al cobrar, la propina sugerida del restaurante (10% si no la cambió) ya queda puesta; se puede quitar o cambiar
   const openPayment = () => {
     setTipAmount(tenPercent)
     setTipText("")
@@ -414,7 +420,7 @@ export default function TablesPage() {
   const paymentLabel = isMixed
     ? `Efectivo ${cop(cashPaid)} + ${transferMethod || "transferencia"} ${cop(transferPart)}`
     : paymentMethod
-  const tenPercent = suggestedTip(subtotal)
+  const tenPercent = suggestedTip(subtotal, settings.tipPercent)
 
   const categories = useMemo(() => {
     const names = new Set<string>()
@@ -718,7 +724,7 @@ export default function TablesPage() {
                   <div>
                     <h3 className="mb-2 font-display text-base font-bold">Método de pago</h3>
                     <div className="grid grid-cols-2 gap-2">
-                      {PAYMENT_METHODS.map(method => (
+                      {paymentMethods.map(method => (
                         <button
                           key={method}
                           onClick={() => setPaymentMethod(method)}
@@ -751,7 +757,7 @@ export default function TablesPage() {
                           <span className="font-bold tnum">{cop(transferPart)}</span>
                         </div>
                         <div className="grid grid-cols-2 gap-2">
-                          {TRANSFER_METHODS.map(method => (
+                          {transferMethods.map(method => (
                             <button
                               key={method}
                               onClick={() => setTransferMethod(method)}
@@ -784,7 +790,7 @@ export default function TablesPage() {
                             tipAmount === tenPercent ? "bg-brand text-brand-ink" : "bg-surface-2 text-soft hover:text-ink"
                           )}
                         >
-                          10% · {cop(tenPercent)}
+                          {settings.tipPercent}% · {cop(tenPercent)}
                         </button>
                       )}
                       {TIP_PRESETS.filter(amount => amount === 0 || amount !== tenPercent).map(amount => (

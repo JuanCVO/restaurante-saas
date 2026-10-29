@@ -1,33 +1,30 @@
 import { Request, Response } from "express"
 import bcrypt from "bcryptjs"
-import jwt from "jsonwebtoken"
-import { prisma } from "../lib/prisma"
-import { env } from "../lib/env"
+import { prisma, unscopedPrisma } from "../lib/prisma"
 import { LoginSchema, CreateEmployeeSchema, ChangePasswordSchema, ResetPasswordSchema } from "../lib/validators"
 import { asyncHandler } from "../lib/asyncHandler"
-import { BusinessError } from "../lib/errors"
+import { BusinessError, HTTP } from "../lib/errors"
 import { audit } from "../lib/audit"
 import { forgetUser } from "../lib/userCache"
+import { getTenantConfig, tenantPayload } from "../lib/tenantConfig"
+import { signToken } from "../lib/session"
 
-const TOKEN_EXPIRES_IN = "12h"
 const BCRYPT_ROUNDS = 12
 
 // Se compara igual aunque el correo no exista, para no delatar cuáles están registrados
 const DUMMY_HASH = bcrypt.hashSync("contraseña-de-relleno", BCRYPT_ROUNDS)
 
-const signToken = (userId: string, role: "ADMIN" | "EMPLOYEE", restaurantId: string) =>
-  jwt.sign({ userId, role, restaurantId }, env.jwtSecret, { expiresIn: TOKEN_EXPIRES_IN })
-
+// el correo es único en todo el sistema, no por restaurante: por eso esta búsqueda no lleva el límite
 const findUserByEmailInsensitive = (email: string) =>
-  prisma.user.findFirst({ where: { email: { equals: email, mode: "insensitive" } } })
+  unscopedPrisma.user.findFirst({ where: { email: { equals: email, mode: "insensitive" } } })
 
 export const createEmployee = asyncHandler(async (req: Request, res: Response) => {
   const data = CreateEmployeeSchema.parse(req.body)
   const adminUser = req.user
-  if (!adminUser?.restaurantId) throw new BusinessError("FORBIDDEN", 401)
+  if (!adminUser?.restaurantId) throw new BusinessError("UNAUTHENTICATED")
 
   const existing = await findUserByEmailInsensitive(data.email)
-  if (existing) throw new BusinessError("EMAIL_TAKEN", 400)
+  if (existing) throw new BusinessError("EMAIL_TAKEN")
 
   const user = await prisma.user.create({
     data: {
@@ -41,7 +38,7 @@ export const createEmployee = asyncHandler(async (req: Request, res: Response) =
 
   audit(req, "employee.create", { employeeId: user.id })
 
-  return res.status(201).json({
+  return res.status(HTTP.CREATED).json({
     id: user.id,
     name: user.name,
     email: user.email,
@@ -64,11 +61,9 @@ export const listUsers = asyncHandler(async (req: Request, res: Response) => {
 export const deleteUser = asyncHandler(async (req: Request, res: Response) => {
   const userId = req.params.userId as string
   const adminUser = req.user
-  if (!adminUser) throw new BusinessError("FORBIDDEN", 401)
+  if (!adminUser) throw new BusinessError("UNAUTHENTICATED")
 
-  if (userId === adminUser.userId) {
-    return res.status(400).json({ message: "No puedes eliminarte a ti mismo" })
-  }
+  if (userId === adminUser.userId) throw new BusinessError("SELF_DELETE")
 
   const target = await prisma.user.findUnique({
     where: { id: userId },
@@ -77,13 +72,11 @@ export const deleteUser = asyncHandler(async (req: Request, res: Response) => {
       _count: { select: { orders: true, employeePayments: true } },
     },
   })
-  if (!target) throw new BusinessError("RESOURCE_NOT_FOUND", 404)
+  if (!target) throw new BusinessError("RESOURCE_NOT_FOUND")
   if (target.restaurantId !== adminUser.restaurantId) {
-    throw new BusinessError("FORBIDDEN", 403)
+    throw new BusinessError("FORBIDDEN")
   }
-  if (target.role === "ADMIN") {
-    return res.status(403).json({ message: "No se puede eliminar a un administrador." })
-  }
+  if (target.role === "ADMIN") throw new BusinessError("ADMIN_PROTECTED")
 
   if (target._count.orders > 0 || target._count.employeePayments > 0) {
     await prisma.user.update({
@@ -104,31 +97,35 @@ export const deleteUser = asyncHandler(async (req: Request, res: Response) => {
 export const changeOwnPassword = asyncHandler(async (req: Request, res: Response) => {
   const { currentPassword, newPassword } = ChangePasswordSchema.parse(req.body)
   const userId = req.user?.userId
-  if (!userId) throw new BusinessError("FORBIDDEN", 401)
+  if (!userId) throw new BusinessError("UNAUTHENTICATED")
 
-  const me = await prisma.user.findUnique({ where: { id: userId }, select: { password: true } })
+  const me = await prisma.user.findUnique({ where: { id: userId }, select: { password: true, role: true, restaurantId: true } })
   const ok = await bcrypt.compare(currentPassword, me?.password ?? DUMMY_HASH)
-  if (!me || !ok) throw new BusinessError("WRONG_PASSWORD", 400)
+  if (!me || !ok) throw new BusinessError("WRONG_PASSWORD")
 
-  await prisma.user.update({ where: { id: userId }, data: { password: await bcrypt.hash(newPassword, BCRYPT_ROUNDS) } })
+  const newHash = await bcrypt.hash(newPassword, BCRYPT_ROUNDS)
+  await prisma.user.update({ where: { id: userId }, data: { password: newHash } })
+  forgetUser(userId)
   audit(req, "password.change")
-  return res.json({ message: "Contraseña actualizada." })
+  // las sesiones abiertas en otros equipos quedan cerradas; esta recibe un token nuevo para seguir
+  const token = signToken({ id: userId, role: me.role, restaurantId: me.restaurantId, password: newHash })
+  return res.json({ message: "Contraseña actualizada.", token })
 })
 
 export const resetEmployeePassword = asyncHandler(async (req: Request, res: Response) => {
   const { password } = ResetPasswordSchema.parse(req.body)
   const userId = req.params.userId as string
   const adminUser = req.user
-  if (!adminUser) throw new BusinessError("FORBIDDEN", 401)
+  if (!adminUser) throw new BusinessError("UNAUTHENTICATED")
 
   const target = await prisma.user.findUnique({ where: { id: userId }, select: { restaurantId: true, role: true } })
-  if (!target) throw new BusinessError("RESOURCE_NOT_FOUND", 404)
-  if (target.restaurantId !== adminUser.restaurantId) throw new BusinessError("FORBIDDEN", 403)
-  if (target.role === "ADMIN") {
-    return res.status(403).json({ message: "Tu propia contraseña se cambia desde «Mi contraseña»." })
-  }
+  if (!target) throw new BusinessError("RESOURCE_NOT_FOUND")
+  if (target.restaurantId !== adminUser.restaurantId) throw new BusinessError("FORBIDDEN")
+  if (target.role === "ADMIN") throw new BusinessError("ADMIN_PASSWORD")
 
   await prisma.user.update({ where: { id: userId }, data: { password: await bcrypt.hash(password, BCRYPT_ROUNDS) } })
+  // el empleado queda sin sesión en todos sus equipos hasta que entre con la clave nueva
+  forgetUser(userId)
   audit(req, "password.reset", { employeeId: userId })
   return res.json({ message: "Contraseña actualizada." })
 })
@@ -136,15 +133,16 @@ export const resetEmployeePassword = asyncHandler(async (req: Request, res: Resp
 export const login = asyncHandler(async (req: Request, res: Response) => {
   const data = LoginSchema.parse(req.body)
 
-  const user = await prisma.user.findFirst({
+  // todavía no hay restaurante en la petición: el login es lo que lo descubre
+  const user = await unscopedPrisma.user.findFirst({
     where: { email: { equals: data.email, mode: "insensitive" } },
     include: { restaurant: { select: { name: true } } },
   })
 
   const isValidPassword = await bcrypt.compare(data.password, user?.password ?? DUMMY_HASH)
-  if (!user || !user.active || !isValidPassword) throw new BusinessError("INVALID_CREDENTIALS", 401)
+  if (!user || !user.active || !isValidPassword) throw new BusinessError("INVALID_CREDENTIALS")
 
-  const token = signToken(user.id, user.role, user.restaurantId)
+  const token = signToken(user)
 
   return res.json({
     token,
@@ -156,5 +154,7 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
       restaurantId: user.restaurantId,
       restaurantName: user.restaurant?.name,
     },
+    // plan, funcionalidades y configuración: el frontend los usa para mostrar solo lo que el restaurante tiene
+    tenant: tenantPayload(await getTenantConfig(user.restaurantId)),
   })
 })

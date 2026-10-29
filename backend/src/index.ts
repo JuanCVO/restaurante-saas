@@ -1,4 +1,5 @@
 import "./lib/env"
+import { sendError } from "./lib/errors"
 import express from "express"
 import cors from "cors"
 import helmet from "helmet"
@@ -13,6 +14,7 @@ import orderRoutes from "./routes/order.routes"
 import dailySummaryRoutes from "./routes/dailySummary.routes"
 import cashMovementRoutes from "./routes/cashMovement.routes"
 import employeePaymentRoutes from "./routes/employeePayment.routes"
+import tenantRoutes from "./routes/tenant.routes"
 
 const app = express()
 
@@ -69,6 +71,10 @@ app.use("/api/orders", orderRoutes)
 app.use("/api/daily-summary", dailySummaryRoutes)
 app.use("/api/cash-movements", cashMovementRoutes)
 app.use("/api/employee-payments", employeePaymentRoutes)
+app.use("/api/tenant", tenantRoutes)
+
+// cualquier ruta que no exista responde en JSON, igual que el resto de errores
+app.use((_req, res) => sendError(res, "ROUTE_NOT_FOUND"))
 
 app.use(errorHandler)
 

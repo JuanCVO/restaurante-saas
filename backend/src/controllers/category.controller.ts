@@ -1,4 +1,5 @@
 import { Request, Response } from "express"
+import { HTTP } from "../lib/errors"
 import { prisma } from "../lib/prisma"
 import { CategorySchema } from "../lib/validators"
 import { asyncHandler } from "../lib/asyncHandler"
@@ -15,7 +16,7 @@ export const getCategories = asyncHandler(async (req: Request, res: Response) =>
 export const createCategory = asyncHandler(async (req: Request, res: Response) => {
   const data = CategorySchema.parse(req.body)
   const category = await prisma.category.create({ data })
-  return res.status(201).json(category)
+  return res.status(HTTP.CREATED).json(category)
 })
 
 export const deleteCategory = asyncHandler(async (req: Request, res: Response) => {

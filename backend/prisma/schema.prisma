@@ -9,12 +9,25 @@ datasource db {
   directUrl = env("DATABASE_URL")
 }
 
+// Plan contratado: define qué módulos tiene un restaurante (ver lib/entitlements.ts)
+enum Plan {
+  BASICO
+  PRO
+}
+
 model Restaurant {
   id        String   @id @default(uuid())
   name      String
   address   String?
   phone     String?
   createdAt DateTime @default(now())
+
+  // Los restaurantes que ya existían quedan en PRO para no perder nada de lo que usan hoy
+  plan         Plan @default(PRO)
+  // Configuración propia del restaurante (propina sugerida, medios de pago); lo que falte toma el valor por defecto
+  settings     Json @default("{}")
+  // Excepciones al plan, funcionalidad por funcionalidad: { "pdf_reports": false }
+  featureFlags Json @default("{}")
 
   users      User[]
   categories Category[]

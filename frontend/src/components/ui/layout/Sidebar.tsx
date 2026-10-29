@@ -14,15 +14,17 @@ import { useCurrentUser, clearSession } from "@/lib/auth"
 import { OPEN_PRINTER_EVENT } from "@/lib/printer"
 import { cn } from "@/lib/utils"
 import { Modal } from "@/components/ui/modal"
+import { hasFeature } from "@/lib/tenant"
+import type { Feature } from "@/types/api"
 import { useDayActions } from "@/components/ui/layout/DayActions"
 
-type NavItem = { href: string; icon: LucideIcon; label: string; short: string }
+type NavItem = { href: string; icon: LucideIcon; label: string; short: string; feature?: Feature }
 
 const ADMIN_NAV: NavItem[] = [
   { href: "/dashboard", icon: LayoutDashboard, label: "Dashboard",        short: "Inicio" },
   { href: "/tables",    icon: UtensilsCrossed, label: "Mesas",            short: "Mesas" },
   { href: "/inventory", icon: Package,         label: "Inventario",       short: "Inventario" },
-  { href: "/purchases", icon: ShoppingCart,    label: "Compras y gastos", short: "Compras" },
+  { href: "/purchases", icon: ShoppingCart,    label: "Compras y gastos", short: "Compras", feature: "cash_management" },
   { href: "/employees", icon: Users,           label: "Empleados",        short: "Equipo" },
 ]
 
@@ -59,7 +61,8 @@ export default function Sidebar() {
   const [moreOpen, setMoreOpen] = useState(false)
 
   const isAdmin = user?.role === "ADMIN"
-  const nav = isAdmin ? ADMIN_NAV : EMPLOYEE_NAV
+  const nav = isAdmin ? ADMIN_NAV.filter(item => !item.feature || hasFeature(user, item.feature)) : EMPLOYEE_NAV
+  const canPdf = hasFeature(user, "pdf_reports")
   const userName = user?.name ?? ""
 
   const { openClose, openPdf, pdfLoading, modals } = useDayActions(restaurantId)
@@ -150,10 +153,12 @@ export default function Sidebar() {
                 <Moon size={18} className="shrink-0" />
                 <span className="max-lg:hidden">Cerrar día</span>
               </button>
-              <button onClick={openPdf} disabled={pdfLoading} title="Descargar PDF" aria-label="Descargar PDF" className={actionBtn}>
-                {pdfLoading ? <Loader2 size={18} className="shrink-0 animate-spin" /> : <FileDown size={18} className="shrink-0" />}
-                <span className="max-lg:hidden">{pdfLoading ? "Descargando..." : "Descargar PDF"}</span>
-              </button>
+              {canPdf && (
+                <button onClick={openPdf} disabled={pdfLoading} title="Descargar PDF" aria-label="Descargar PDF" className={actionBtn}>
+                  {pdfLoading ? <Loader2 size={18} className="shrink-0 animate-spin" /> : <FileDown size={18} className="shrink-0" />}
+                  <span className="max-lg:hidden">{pdfLoading ? "Descargando..." : "Descargar PDF"}</span>
+                </button>
+              )}
             </>
           )}
 
@@ -229,12 +234,14 @@ export default function Sidebar() {
           >
             <Printer size={20} className="text-soft" /> Impresora
           </button>
-          <button
-            onClick={() => { setMoreOpen(false); openPdf() }}
-            className="flex h-12 items-center gap-3 rounded-md px-3 text-left text-base font-semibold hover:bg-surface-2"
-          >
-            <FileDown size={20} className="text-soft" /> Descargar PDF
-          </button>
+          {canPdf && (
+            <button
+              onClick={() => { setMoreOpen(false); openPdf() }}
+              className="flex h-12 items-center gap-3 rounded-md px-3 text-left text-base font-semibold hover:bg-surface-2"
+            >
+              <FileDown size={20} className="text-soft" /> Descargar PDF
+            </button>
+          )}
           <button
             onClick={handleLogout}
             className="flex h-12 items-center gap-3 rounded-md px-3 text-left text-base font-semibold text-bad hover:bg-surface-2"

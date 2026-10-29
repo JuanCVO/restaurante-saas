@@ -4,7 +4,7 @@ import { prisma } from "../lib/prisma"
 import { getColombiaDayRange } from "../lib/date"
 import { getOpenPeriod } from "../lib/period"
 import { asyncHandler } from "../lib/asyncHandler"
-import { BusinessError } from "../lib/errors"
+import { BusinessError, HTTP } from "../lib/errors"
 import { closeDayForRestaurant, purgeOldArchivedOrders } from "../services/dailyClose.service"
 import { audit } from "../lib/audit"
 
@@ -17,9 +17,9 @@ export const closeDay = asyncHandler(async (req: Request, res: Response) => {
   purgeOldArchivedOrders(restaurantId).catch(err => console.error("No se pudo limpiar órdenes archivadas", err))
 
   if (result.kind === "updated") {
-    return res.status(200).json({ message: "Cierre del día actualizado.", summary: result.summary, updated: true })
+    return res.status(HTTP.OK).json({ message: "Cierre del día actualizado.", summary: result.summary, updated: true })
   }
-  return res.status(201).json({ message: "Día cerrado correctamente.", summary: result.summary })
+  return res.status(HTTP.CREATED).json({ message: "Día cerrado correctamente.", summary: result.summary })
 })
 
 export const getPeriod = asyncHandler(async (req: Request, res: Response) => {
@@ -90,9 +90,9 @@ export const deleteDailySummary = asyncHandler(async (req: Request, res: Respons
     where: { id },
     select: { restaurantId: true },
   })
-  if (!summary) throw new BusinessError("RESOURCE_NOT_FOUND", 404)
+  if (!summary) throw new BusinessError("RESOURCE_NOT_FOUND")
   if (summary.restaurantId !== req.user?.restaurantId) {
-    throw new BusinessError("FORBIDDEN", 403)
+    throw new BusinessError("FORBIDDEN")
   }
   await prisma.dailySummary.delete({ where: { id } })
   audit(req, "summary.delete", { summaryId: id })

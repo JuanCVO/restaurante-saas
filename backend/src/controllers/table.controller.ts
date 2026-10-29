@@ -1,4 +1,5 @@
 import { Request, Response } from "express"
+import { HTTP, BusinessError } from "../lib/errors"
 import { TableStatus } from "@prisma/client"
 import { prisma } from "../lib/prisma"
 import { TableSchema } from "../lib/validators"
@@ -18,16 +19,16 @@ export const getTables = asyncHandler(async (req: Request, res: Response) => {
 export const createTable = asyncHandler(async (req: Request, res: Response) => {
   const data = TableSchema.parse(req.body)
   const exists = await prisma.table.findFirst({ where: { restaurantId: data.restaurantId, number: data.number }, select: { id: true } })
-  if (exists) return res.status(409).json({ code: "DUPLICATE", message: `Ya existe la mesa ${data.number}.` })
+  if (exists) throw new BusinessError("DUPLICATE", { message: `Ya existe la mesa ${data.number}.` })
   const table = await prisma.table.create({ data })
-  return res.status(201).json(table)
+  return res.status(HTTP.CREATED).json(table)
 })
 
 export const updateTableStatus = asyncHandler(async (req: Request, res: Response) => {
   const id = req.params.id as string
   const { status } = req.body as { status: TableStatus }
   if (status !== "DISPONIBLE" && status !== "OCUPADA") {
-    return res.status(400).json({ message: "Estado inválido" })
+    throw new BusinessError("VALIDATION_ERROR", { message: "Estado inválido." })
   }
   const table = await prisma.table.update({ where: { id }, data: { status } })
   return res.json(table)

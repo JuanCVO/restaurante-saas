@@ -49,7 +49,7 @@ export const closeDayForRestaurant = async (restaurantId: string): Promise<Close
     const nothingToClose =
       orders.length === 0 && baseCaja === 0 && totalGastos === 0 &&
       totalCompras === 0 && totalPagosEmpleados === 0 && propinasEntregadas === 0
-    if (nothingToClose) throw new BusinessError("EMPTY_DAY", 422)
+    if (nothingToClose) throw new BusinessError("EMPTY_DAY")
 
     const moments = [
       ...orders.map(o => (o.closedAt ?? o.createdAt).getTime()),

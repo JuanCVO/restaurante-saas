@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react"
 import { KeyRound, Plus, Shield, Trash2, UserCheck } from "lucide-react"
 
 import api from "@/lib/axios"
-import { useCurrentUser } from "@/lib/auth"
+import { getCurrentUser, setSession, useCurrentUser } from "@/lib/auth"
 import { apiMessage } from "@/lib/errors"
 import { shortDate } from "@/lib/format"
 import { cn } from "@/lib/utils"
@@ -124,7 +124,10 @@ export default function EmployeesPage() {
     setOwnSaving(true)
     setOwnError("")
     try {
-      await api.patch("/auth/password", { currentPassword: ownCurrent, newPassword: ownNew })
+      const { data } = await api.patch("/auth/password", { currentPassword: ownCurrent, newPassword: ownNew })
+      // al cambiar la clave se cierran las demás sesiones; esta sigue con el token nuevo
+      const me = getCurrentUser()
+      if (data?.token && me) setSession(data.token, me)
       toast.success("Tu contraseña se actualizó.")
       setOwnOpen(false)
       setOwnCurrent("")

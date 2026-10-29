@@ -1,5 +1,22 @@
 export type Role = "ADMIN" | "EMPLOYEE"
 
+// Funcionalidades que un plan puede incluir; las decide el servidor (backend/src/lib/entitlements.ts)
+export type Feature = "cash_management" | "pdf_reports"
+
+export type PaymentMethod = "Efectivo" | "Nequi" | "Bancolombia" | "Mixto"
+
+export type TenantSettings = {
+  tipPercent: number
+  paymentMethods: PaymentMethod[]
+}
+
+// Plan, funcionalidades y configuración del restaurante, como los devuelve el servidor
+export type TenantConfig = {
+  plan: "BASICO" | "PRO"
+  features: Feature[]
+  settings: TenantSettings
+}
+
 export type CurrentUser = {
   id: string
   name: string
@@ -7,6 +24,8 @@ export type CurrentUser = {
   role: Role
   restaurantId: string
   restaurantName?: string
+  // las sesiones iniciadas antes de existir los planes no lo traen
+  tenant?: TenantConfig
 }
 
 export type Employee = {

@@ -53,6 +53,35 @@ export const clearSession = () => {
   emit()
 }
 
+// El token trae su vencimiento (campo exp, en segundos). Aquí solo se lee para cerrar la sesión a tiempo;
+// quien de verdad valida la firma y el vencimiento es el servidor.
+export const tokenExpiresAt = (token: string | null): number | null => {
+  if (!token) return null
+  try {
+    const payload = token.split(".")[1]
+    if (!payload) return null
+    const json = atob(payload.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(payload.length / 4) * 4, "="))
+    const exp = (JSON.parse(json) as { exp?: unknown }).exp
+    return typeof exp === "number" ? exp * 1000 : null
+  } catch {
+    return null
+  }
+}
+
+export const isSessionExpired = (token: string | null) => {
+  const at = tokenExpiresAt(token)
+  return at !== null && Date.now() >= at
+}
+
+// el login lo lee para explicar por qué se volvió a pedir la contraseña
+export const SESSION_NOTICE_KEY = "session-notice"
+export const SESSION_ENDED_MESSAGE = "Tu sesión venció. Inicia sesión de nuevo."
+
+export const endSession = () => {
+  try { sessionStorage.setItem(SESSION_NOTICE_KEY, SESSION_ENDED_MESSAGE) } catch { /* sin aviso, igual se cierra */ }
+  clearSession()
+}
+
 export const authHeaders = () => {
   const token = getToken()
   return token ? { Authorization: `Bearer ${token}` } : {}
