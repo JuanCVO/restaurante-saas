@@ -63,10 +63,16 @@ export const buildReceipt = (d: ReceiptData): Op[] => {
   } else {
     const percent = d.tipPercent ?? 10
     const tip = suggestedTip(d.subtotal, percent)
-    ops.push({ t: "row", left: "TOTAL", right: cop(d.subtotal), bold: true, big: true })
     if (tip > 0) {
-      ops.push({ t: "text", text: `Propina voluntaria sugerida (${percent}%): ${cop(tip)}` })
-      ops.push({ t: "text", text: `Total con propina: ${cop(d.subtotal + tip)}` })
+      // el número grande es el total con propina; si no, el cliente cree que debe pagar solo el subtotal
+      ops.push({ t: "row", left: "Subtotal", right: cop(d.subtotal) })
+      ops.push({ t: "row", left: `Propina voluntaria (${percent}%)`, right: cop(tip) })
+      ops.push({ t: "rule" })
+      ops.push({ t: "text", text: "TOTAL CON PROPINA", align: "center", bold: true })
+      ops.push({ t: "text", text: cop(d.subtotal + tip), align: "center", bold: true, big: true })
+    } else {
+      ops.push({ t: "text", text: "TOTAL", align: "center", bold: true })
+      ops.push({ t: "text", text: cop(d.subtotal), align: "center", bold: true, big: true })
     }
   }
 

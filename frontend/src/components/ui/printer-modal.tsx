@@ -1,18 +1,13 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
-import { Printer, Usb } from "lucide-react"
+import { useEffect, useState } from "react"
+import { Usb } from "lucide-react"
 
-import { useCurrentUser } from "@/lib/auth"
-import { renderLines } from "@/lib/escpos"
-import { OPEN_PRINTER_EVENT, PrinterError, usePrinter } from "@/lib/printer"
-import { buildTestReceipt } from "@/lib/receipt"
-import { apiMessage } from "@/lib/errors"
+import { OPEN_PRINTER_EVENT, usePrinter } from "@/lib/printer"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Field, Input, Select } from "@/components/ui/input"
 import { Modal } from "@/components/ui/modal"
-import { useToast } from "@/components/ui/toast"
 
 const STATUS_BADGE = {
   ready: { tone: "good", label: "Conectada" },
@@ -22,11 +17,8 @@ const STATUS_BADGE = {
 } as const
 
 export default function PrinterModal() {
-  const toast = useToast()
-  const { user } = useCurrentUser()
   const printer = usePrinter()
   const [open, setOpen] = useState(false)
-  const [busy, setBusy] = useState(false)
 
   useEffect(() => {
     const onOpen = () => setOpen(true)
@@ -34,25 +26,9 @@ export default function PrinterModal() {
     return () => window.removeEventListener(OPEN_PRINTER_EVENT, onOpen)
   }, [])
 
-  const restaurant = user?.restaurantName ?? "RestaurantOS"
-  const ops = useMemo(() => buildTestReceipt(restaurant, printer.settings.footer), [restaurant, printer.settings.footer])
-  const preview = useMemo(() => renderLines(ops, { cols: printer.settings.cols }), [ops, printer.settings.cols])
-
   const badge = STATUS_BADGE[printer.status]
   const ready = printer.status === "ready"
   const viaRawBt = printer.settings.method === "rawbt"
-
-  const testPrint = async () => {
-    setBusy(true)
-    try {
-      await printer.print(ops)
-      toast.success("Se envió el tiquete de prueba a la impresora.")
-    } catch (err) {
-      toast.error(err instanceof PrinterError ? err.message : apiMessage(err, "No se pudo imprimir."))
-    } finally {
-      setBusy(false)
-    }
-  }
 
   return (
     <Modal open={open} onClose={() => setOpen(false)} title="Impresora" subtitle={ready ? printer.deviceName : "Tiquetes de 80 mm por USB"} size="md">
@@ -91,7 +67,7 @@ export default function PrinterModal() {
           <ol className="list-decimal space-y-1 pl-5 text-sm text-soft">
             <li>Instala la app RawBT en la tablet y ábrela una vez.</li>
             <li>En RawBT elige tu impresora USB y acepta el permiso de Android.</li>
-            <li>Toca «Imprimir prueba»: RawBT se abre un momento y saca el tiquete.</li>
+            <li>Listo: al imprimir una cuenta, RawBT se abre un momento y saca el tiquete.</li>
           </ol>
         )}
 
@@ -102,15 +78,6 @@ export default function PrinterModal() {
             <li>Acepta el permiso. Queda recordada: no hay que repetirlo.</li>
           </ol>
         )}
-
-        <div className="flex flex-wrap gap-2">
-          <Button variant="primary" onClick={testPrint} loading={busy} disabled={!ready}>
-            <Printer size={17} /> Imprimir prueba
-          </Button>
-          <Button variant="secondary" onClick={() => printer.printInBrowser(ops)}>
-            Probar desde el navegador
-          </Button>
-        </div>
 
         <fieldset className="flex flex-col gap-3">
           <legend className="mb-1 font-display text-base font-bold">Opciones</legend>
@@ -173,19 +140,6 @@ export default function PrinterModal() {
             />
           </Field>
         </fieldset>
-
-        <div>
-          <p className="mb-2 text-sm font-semibold text-soft">Así se verá el tiquete</p>
-          <div className="overflow-x-auto rounded-md bg-plate p-3 text-canvas">
-            <pre className="m-0 w-fit font-mono text-[11px] leading-[1.25]" aria-label="Vista previa del tiquete">
-              {preview.map((l, i) => (
-                <div key={i} className={[l.big ? "text-[22px] leading-[1.1]" : "", l.bold ? "font-bold" : "", "min-h-[1.25em]"].join(" ")}>
-                  {l.text}
-                </div>
-              ))}
-            </pre>
-          </div>
-        </div>
       </div>
     </Modal>
   )
