@@ -17,9 +17,13 @@ type UsbDevice = {
   manufacturerName?: string
   opened: boolean
   configuration: { interfaces: UsbInterface[] } | null
+  configurations: { configurationValue: number }[]
   open(): Promise<void>
+  close(): Promise<void>
+  forget?(): Promise<void>
   selectConfiguration(n: number): Promise<void>
   claimInterface(n: number): Promise<void>
+  releaseInterface(n: number): Promise<void>
   selectAlternateInterface(i: number, a: number): Promise<void>
   transferOut(endpoint: number, data: BufferSource): Promise<{ status: string; bytesWritten: number }>
 }
@@ -69,7 +73,8 @@ const detailOf = (err: unknown) => {
 }
 
 let state: PrinterState = SERVER_STATE
-let active: { device: UsbDevice; iface: number; endpoint: number } | null = null
+type Link = { device: UsbDevice; iface: number; endpoint: number }
+let active: Link | null = null
 let initialized = false
 const listeners = new Set<() => void>()
 
@@ -117,21 +122,85 @@ const findTarget = (device: UsbDevice) => {
   return null
 }
 
-const attach = async (device: UsbDevice) => {
-  if (!device.opened) await device.open()
-  if (device.configuration === null) await device.selectConfiguration(1)
-  const target = findTarget(device)
-  if (!target) throw new Error("Esta conexión USB no tiene salida de impresión.")
-  const iface = device.configuration?.interfaces.find(i => i.interfaceNumber === target.iface)
-  if (!iface?.claimed) await device.claimInterface(target.iface)
-  if (target.alt !== 0) await device.selectAlternateInterface(target.iface, target.alt)
-  active = { device, iface: target.iface, endpoint: target.endpoint }
+// suelta la interfaz y cierra el dispositivo; así un intento fallido no deja la impresora retenida
+const releaseQuietly = async (device: UsbDevice, iface?: number) => {
+  try { if (iface !== undefined && device.opened) await device.releaseInterface(iface) } catch { /* ya estaba suelta */ }
+  try { if (device.opened) await device.close() } catch { /* ya estaba cerrado */ }
+}
+
+// dice en qué paso falló, para poder explicarlo bien
+type AttachStep = "open" | "config" | "target" | "claim"
+class AttachFailure extends Error {
+  constructor(public step: AttachStep, public original: unknown) {
+    super(detailOf(original))
+  }
+}
+
+const attachNow = async (device: UsbDevice) => {
+  // ya conectada con este mismo dispositivo: no se abre dos veces
+  if (active?.device === device && device.opened) {
+    set({ status: "ready", deviceName: nameOf(device), error: "", detail: "" })
+    return
+  }
+
+  let step: AttachStep = "open"
+  let claimed: number | undefined
+  try {
+    if (!device.opened) await device.open()
+    step = "config"
+    if (device.configuration === null) {
+      await device.selectConfiguration(device.configurations[0]?.configurationValue ?? 1)
+    }
+    step = "target"
+    const target = findTarget(device)
+    if (!target) throw new Error("Esta conexión USB no tiene salida de impresión.")
+    step = "claim"
+    const iface = device.configuration?.interfaces.find(i => i.interfaceNumber === target.iface)
+    if (!iface?.claimed) {
+      await device.claimInterface(target.iface)
+      claimed = target.iface
+    }
+    if (target.alt !== 0) await device.selectAlternateInterface(target.iface, target.alt)
+    active = { device, iface: target.iface, endpoint: target.endpoint }
+  } catch (err) {
+    await releaseQuietly(device, claimed)
+    throw new AttachFailure(step, err)
+  }
   writeJson(LAST_KEY, { vendorId: device.vendorId, productId: device.productId })
   set({ status: "ready", deviceName: nameOf(device), error: "", detail: "" })
 }
 
+// un solo intento a la vez: el reconectar automático y el botón no se pisan abriendo el mismo dispositivo
+let queue: Promise<unknown> = Promise.resolve()
+const attach = (device: UsbDevice) => {
+  const run = queue.then(() => attachNow(device))
+  queue = run.catch(() => {})
+  return run
+}
+
 const FRIENDLY_OPEN_ERROR =
   "No se pudo abrir la impresora. Desconecta y vuelve a conectar el cable USB, acepta el permiso del equipo e intenta de nuevo."
+
+// el mensaje depende de qué falló, no es el mismo problema en todos los casos
+const explain = (err: unknown): { error: string; detail: string } => {
+  const step = err instanceof AttachFailure ? err.step : undefined
+  const original = err instanceof AttachFailure ? err.original : err
+  const name = (original as { name?: string })?.name
+
+  let error = FRIENDLY_OPEN_ERROR
+  if (step === "open" && name === "SecurityError") {
+    error =
+      "El sistema no deja abrir la impresora. En Windows suele faltar el driver WinUSB (instálalo con Zadig); " +
+      "en Android, el permiso USB. Cierra también otras pestañas o programas que usen la impresora."
+  } else if (step === "claim") {
+    error =
+      "La impresora está tomada por otro programa o por el sistema. Cierra otras pestañas con la app, " +
+      "desconecta y vuelve a conectar el cable USB, y prueba de nuevo."
+  } else if (name === "InvalidStateError") {
+    error = "La impresora quedó a medias. Desconecta y vuelve a conectar el cable USB e intenta de nuevo."
+  }
+  return { error, detail: [step && `paso: ${step}`, detailOf(original)].filter(Boolean).join(" · ") }
+}
 
 // reconecta con una impresora ya autorizada, sin pedir permiso
 export const reconnectPrinter = async () => {
@@ -152,7 +221,7 @@ export const reconnectPrinter = async () => {
   } catch (err) {
     active = null
     console.error("[impresora] no se pudo reconectar", err)
-    set({ status: "disconnected", deviceName: "", error: FRIENDLY_OPEN_ERROR, detail: detailOf(err) })
+    set({ status: "disconnected", deviceName: "", ...explain(err) })
   }
 }
 
@@ -162,7 +231,8 @@ export const connectPrinter = async () => {
   if (!usb) throw new PrinterError("UNSUPPORTED", "Este navegador no puede conectarse a la impresora por USB. Usa Chrome.")
   set({ status: "connecting", error: "" })
   try {
-    const device = await usb.requestDevice({ filters: [] })
+    // Gainscha/Digital POS (0x0fe6) o cualquier dispositivo de clase impresora (7)
+    const device = await usb.requestDevice({ filters: [{ vendorId: 0x0fe6 }, { classCode: 7 }] })
     await attach(device)
   } catch (err) {
     active = null
@@ -170,14 +240,18 @@ export const connectPrinter = async () => {
     if (!cancelled) console.error("[impresora] no se pudo conectar", err)
     set({
       status: "disconnected", deviceName: "",
-      error: cancelled ? "" : FRIENDLY_OPEN_ERROR,
-      detail: cancelled ? "" : detailOf(err),
+      ...(cancelled ? { error: "", detail: "" } : explain(err)),
     })
   }
 }
 
+// suelta la impresora de verdad y le quita el permiso al sitio
 export const disconnectPrinter = () => {
+  const link = active
   active = null
+  if (link) {
+    void releaseQuietly(link.device, link.iface).then(() => link.device.forget?.().catch(() => {}))
+  }
   try { localStorage.removeItem(LAST_KEY) } catch { /* nada que olvidar */ }
   set({ status: "disconnected", deviceName: "", error: "", detail: "" })
 }
@@ -188,6 +262,16 @@ export const updatePrinterSettings = (partial: Partial<PrinterSettings>) => {
   set({ settings })
 }
 
+// lee la conexión actual; una función evita que TypeScript la dé por nula tras reconectar
+const currentLink = (): Link | null => active
+
+const writeAll = async (link: Link, bytes: Uint8Array) => {
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    const result = await link.device.transferOut(link.endpoint, bytes.slice(i, i + CHUNK))
+    if (result.status !== "ok") throw new Error(`transferOut: ${result.status}`)
+  }
+}
+
 export const printOps = async (ops: Op[]) => {
   if (!usbApi()) throw new PrinterError("UNSUPPORTED", "Este navegador no puede imprimir por USB. Usa Chrome.")
   if (!active) await reconnectPrinter()
@@ -196,14 +280,30 @@ export const printOps = async (ops: Op[]) => {
 
   const bytes = renderEscPos(ops, { cols: state.settings.cols, asciiOnly: state.settings.asciiOnly })
   try {
-    for (let i = 0; i < bytes.length; i += CHUNK) {
-      const result = await link.device.transferOut(link.endpoint, bytes.slice(i, i + CHUNK))
-      if (result.status !== "ok") throw new Error(result.status)
-    }
-  } catch {
+    await writeAll(link, bytes)
+  } catch (first) {
+    // la tablet puede haber dormido el puerto USB y dejado la conexión vieja: se reabre una vez y se reintenta
+    await releaseQuietly(link.device, link.iface)
     active = null
-    set({ status: "disconnected", deviceName: "", error: "Se perdió la conexión con la impresora." })
-    throw new PrinterError("WRITE_FAILED", "No se pudo imprimir. Revisa que la impresora esté encendida y con el cable conectado.")
+    await reconnectPrinter()
+    try {
+      const fresh = currentLink()
+      if (!fresh) throw first
+      await writeAll(fresh, bytes)
+    } catch (err) {
+      const last = currentLink()
+      active = null
+      if (last) await releaseQuietly(last.device, last.iface)
+      set({
+        status: "disconnected", deviceName: "",
+        error: "Se perdió la conexión con la impresora.",
+        detail: `primer intento: ${detailOf(first)} · segundo: ${detailOf(err)}`,
+      })
+      throw new PrinterError(
+        "WRITE_FAILED",
+        "No se pudo imprimir. Revisa que la impresora esté encendida, con papel, con la tapa cerrada y con el cable conectado."
+      )
+    }
   }
 }
 
