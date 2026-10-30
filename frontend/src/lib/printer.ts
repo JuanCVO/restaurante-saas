@@ -39,7 +39,11 @@ type Link = { device: UsbDevice; iface: number; endpoint: number }
 
 export type PrinterStatus = "unsupported" | "disconnected" | "connecting" | "ready"
 
+export type PrinterMethod = "usb" | "rawbt"
+
 export type PrinterSettings = {
+  /** "usb": Chrome habla directo con la impresora; "rawbt": se la entrega a la app RawBT (tablets donde el USB directo no deja) */
+  method: PrinterMethod
   /** 42 (área de 72 mm) o 48 */
   cols: 42 | 48
   asciiOnly: boolean
@@ -61,7 +65,7 @@ export class PrinterError extends Error {
   }
 }
 
-export const DEFAULT_SETTINGS: PrinterSettings = { cols: 42, asciiOnly: false, autoPrint: true, footer: "" }
+export const DEFAULT_SETTINGS: PrinterSettings = { method: "usb", cols: 42, asciiOnly: false, autoPrint: true, footer: "" }
 
 const SETTINGS_KEY = "printer:settings"
 const LAST_KEY = "printer:last"
@@ -261,10 +265,25 @@ export const disconnectPrinter = () => {
   set({ status: "disconnected", deviceName: "", error: "", detail: "" })
 }
 
+// RawBT no se puede consultar: se da por lista y se sabrá al imprimir. Con USB se suelta lo que hubiera abierto.
+const applyMethod = (method: PrinterMethod) => {
+  if (method === "rawbt") {
+    const link = active
+    active = null
+    if (link) void releaseQuietly(link.device, link.iface)
+    set({ status: "ready", deviceName: "RawBT", error: "", detail: "" })
+    return
+  }
+  set({ status: usbApi() ? "disconnected" : "unsupported", deviceName: "", error: "", detail: "" })
+  startUsb()
+}
+
 export const updatePrinterSettings = (partial: Partial<PrinterSettings>) => {
   const settings = { ...state.settings, ...partial }
   writeJson(SETTINGS_KEY, settings)
+  const switched = settings.method !== state.settings.method
   set({ settings })
+  if (switched) applyMethod(settings.method)
 }
 
 // lee la conexión actual; una función evita que TypeScript la dé por nula tras reconectar
@@ -319,7 +338,27 @@ const writeAll = async (link: Link, bytes: Uint8Array) => {
 const isStaleConnection = (err: unknown) =>
   err instanceof WriteFailure && !err.started && (err.original as { message?: string })?.message !== TIMEOUT_MESSAGE
 
+const toBase64 = (bytes: Uint8Array) => {
+  let binary = ""
+  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000))
+  return btoa(binary)
+}
+
+// RawBT recibe los bytes ESC/POS en un enlace y los manda a la impresora con la API USB nativa de Android.
+// Chrome solo abre apps externas desde un toque del usuario (o poco después de uno).
+const printViaRawBt = (bytes: Uint8Array) => {
+  const link = document.createElement("a")
+  link.href = `rawbt:base64,${toBase64(bytes)}`
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+}
+
 export const printOps = async (ops: Op[]) => {
+  if (state.settings.method === "rawbt") {
+    printViaRawBt(renderEscPos(ops, { cols: state.settings.cols, asciiOnly: state.settings.asciiOnly }))
+    return
+  }
   if (!usbApi()) throw new PrinterError("UNSUPPORTED", "Este navegador no puede imprimir por USB. Usa Chrome.")
   if (!active) await reconnectPrinter()
   const link = active
@@ -392,24 +431,40 @@ export const printInBrowser = (ops: Op[]) => {
   window.setTimeout(() => iframe.remove(), 3000)
 }
 
+let usbListening = false
+
+// escucha la impresora por USB y reconecta; solo aplica al método "usb"
+const startUsb = () => {
+  const usb = usbApi()
+  if (!usb) return
+  if (!usbListening) {
+    usbListening = true
+    usb.addEventListener("connect", () => {
+      // con la impresora ya lista, lo que se conectó es otro aparato
+      if (!active && state.settings.method === "usb") void reconnectPrinter()
+    })
+    usb.addEventListener("disconnect", e => {
+      // un lector de códigos o un teclado en el mismo adaptador OTG no es la impresora
+      if (e.device !== active?.device) return
+      active = null
+      set({ status: "disconnected", deviceName: "" })
+    })
+  }
+  void reconnectPrinter()
+}
+
 const init = () => {
   if (initialized || typeof window === "undefined") return
   initialized = true
   const settings = { ...DEFAULT_SETTINGS, ...(readJson<Partial<PrinterSettings>>(SETTINGS_KEY) ?? {}) }
+  state = { ...state, settings }
+  if (settings.method === "rawbt") {
+    set({ settings, status: "ready", deviceName: "RawBT" })
+    return
+  }
   const usb = usbApi()
   set({ settings, status: usb ? "disconnected" : "unsupported" })
-  if (!usb) return
-  usb.addEventListener("connect", () => {
-    // con la impresora ya lista, lo que se conectó es otro aparato
-    if (!active) void reconnectPrinter()
-  })
-  usb.addEventListener("disconnect", e => {
-    // un lector de códigos o un teclado en el mismo adaptador OTG no es la impresora
-    if (e.device !== active?.device) return
-    active = null
-    set({ status: "disconnected", deviceName: "" })
-  })
-  void reconnectPrinter()
+  startUsb()
 }
 
 export const usePrinter = () => {

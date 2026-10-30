@@ -40,6 +40,7 @@ export default function PrinterModal() {
 
   const badge = STATUS_BADGE[printer.status]
   const ready = printer.status === "ready"
+  const viaRawBt = printer.settings.method === "rawbt"
 
   const testPrint = async () => {
     setBusy(true)
@@ -62,7 +63,7 @@ export default function PrinterModal() {
             <Badge tone={badge.tone}>{badge.label}</Badge>
           </div>
           <div className="flex gap-2">
-            {ready ? (
+            {viaRawBt ? null : ready ? (
               <Button size="sm" variant="secondary" onClick={printer.disconnect}>Olvidar</Button>
             ) : (
               <Button size="sm" onClick={() => void printer.connect()} loading={printer.status === "connecting"} disabled={!printer.supported}>
@@ -86,7 +87,15 @@ export default function PrinterModal() {
           </p>
         )}
 
-        {printer.supported && !ready && (
+        {viaRawBt && (
+          <ol className="list-decimal space-y-1 pl-5 text-sm text-soft">
+            <li>Instala la app RawBT en la tablet y ábrela una vez.</li>
+            <li>En RawBT elige tu impresora USB y acepta el permiso de Android.</li>
+            <li>Toca «Imprimir prueba»: RawBT se abre un momento y saca el tiquete.</li>
+          </ol>
+        )}
+
+        {!viaRawBt && printer.supported && !ready && (
           <ol className="list-decimal space-y-1 pl-5 text-sm text-soft">
             <li>Conecta la impresora a la tablet con el cable USB y un adaptador OTG, y enciéndela.</li>
             <li>Toca «Conectar impresora» y elige la impresora en la lista.</li>
@@ -105,6 +114,19 @@ export default function PrinterModal() {
 
         <fieldset className="flex flex-col gap-3">
           <legend className="mb-1 font-display text-base font-bold">Opciones</legend>
+
+          <Field
+            label="Cómo imprimir"
+            hint="USB directo funciona en computador. En la tablet, si el USB directo falla, usa RawBT."
+          >
+            <Select
+              value={printer.settings.method}
+              onChange={e => printer.updateSettings({ method: e.target.value === "rawbt" ? "rawbt" : "usb" })}
+            >
+              <option value="usb">USB directo (Chrome)</option>
+              <option value="rawbt">App RawBT (tablet Android)</option>
+            </Select>
+          </Field>
 
           <label className="flex items-start gap-3">
             <input
