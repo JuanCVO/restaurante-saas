@@ -43,7 +43,7 @@ Cada restaurante opera de forma completamente aislada (multi-tenant). Un emplead
 | **HTTP Client** | Axios |
 | **Backend** | Node.js, Express 5, TypeScript 6 |
 | **ORM** | Prisma 5 con PostgreSQL (Neon serverless) |
-| **Auth** | JWT (8h), bcryptjs (cost 12) |
+| **Auth** | JWT (12 h), bcryptjs (cost 12) |
 | **Seguridad** | Helmet, CORS allowlist, Zod schema validation |
 | **PDF** | pdfkit |
 
@@ -158,9 +158,24 @@ Restaurant
 
 Los permisos se validan en el backend en cada petición; la interfaz solo oculta lo que no corresponde.
 
-### Multi-tenancy y seguridad
+### Multi-tenancy: contexto, planes y configuración
+
+El restaurante (tenant) atraviesa todo el sistema y no es un campo que cada consulta deba recordar:
+
+```
+Usuario → Contexto del tenant → Roles + Funcionalidades del plan → Módulos de negocio → Datos del tenant
+              ↑ Configuración        ↑ Feature flags
+```
+
+- **Contexto del tenant.** `authMiddleware` fija el restaurante de la petición (`backend/src/lib/tenant.ts`, `AsyncLocalStorage`). El cliente de base de datos que usa todo el backend (`backend/src/lib/prisma.ts`) limita cada consulta a ese restaurante por sí solo (`tenantScope.ts`): lecturas, actualizaciones, borrados y altas. Si una consulta pide otro restaurante, o se hace sin restaurante en la petición, falla en vez de devolver datos. Las únicas excepciones (el login, la verificación de la cuenta y que un correo no se repita) usan `unscopedPrisma`, y una prueba (`tenantIsolation.test.ts`) lista los únicos archivos que pueden importarlo.
+- **Planes y funcionalidades.** Cada restaurante tiene un plan (`BASICO` o `PRO`) y, si hace falta, excepciones por funcionalidad (feature flags). Hoy hay dos: `cash_management` (compras, gastos, base de caja y pagos a empleados) y `pdf_reports` (reportes PDF). El backend lo exige con `requireFeature(...)` y el frontend oculta lo que el plan no trae. Los restaurantes que ya existían quedan en `PRO`, sin perder nada. Para cambiarlo: `npm run set-plan -- "Nombre o id" BASICO pdf_reports=on` (dentro de `backend/`).
+- **Configuración por restaurante.** Propina sugerida (`tipPercent`, 10 por defecto) y medios de pago habilitados (`paymentMethods`). Se leen con `GET /api/tenant` y el administrador las cambia con `PATCH /api/tenant/settings`; el cobro rechaza un medio de pago deshabilitado.
+
+### Seguridad
 
 - Cada petición confirma en la base que la cuenta existe y sigue activa; el rol y el restaurante salen de la base, no del token. Un empleado eliminado o desactivado pierde el acceso al instante.
+- La sesión dura 12 h. Si la pantalla se queda abierta, al vencer vuelve sola al login con un aviso. Cambiar o restablecer una contraseña cierra todas las sesiones abiertas de esa cuenta (el token lleva una huella de la contraseña).
+- Los errores del API tienen siempre la forma `{ code, message }` y su código HTTP sale de un solo catálogo (`backend/src/lib/errors.ts`): 401 sin sesión, 403 sin permiso, 404 no existe, 409 choca con el estado de los datos, 422 nada que hacer.
 - Todos los recursos se filtran por restaurante; ningún restaurante puede ver ni tocar datos de otro (probado con dos restaurantes).
 - Las acciones de administrador confirman el rol directamente en la base, sin caché.
 - Contraseñas con bcrypt (costo 12), mínimo 8 caracteres. El login tarda lo mismo exista o no el correo y solo cuentan los intentos fallidos (20 cada 15 minutos por IP). Hay además un tope general de 600 peticiones por minuto por IP.

@@ -41,6 +41,19 @@ test("row con producto largo mantiene el precio en la primera línea", () => {
   assert.ok(lines.every(l => l.length <= 42))
 })
 
+test("propina sugerida con otro porcentaje: el 10 % sigue igual, 0 % no sugiere nada y el total sigue en billetes", () => {
+  assert.equal(suggestedTip(53500, 10), suggestedTip(53500))
+  assert.equal(suggestedTip(53500, 0), 0)
+  for (const percent of [5, 8, 12, 15, 20]) {
+    for (const subtotal of [15500, 53500, 76000, 105500, 150000]) {
+      const tip = suggestedTip(subtotal, percent)
+      assert.equal((subtotal + tip) % 1000, 0, `${percent}% de ${subtotal}`)
+      // queda a menos de un billete de la propina exacta
+      assert.ok(Math.abs(tip - subtotal * percent / 100) <= 1000, `${percent}% de ${subtotal} dio ${tip}`)
+    }
+  }
+})
+
 test("propina sugerida: cerca del 10% y con el total en billetes", () => {
   const casos: [number, number][] = [
     [53500, 5500],   // total 59.000

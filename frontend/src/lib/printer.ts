@@ -25,13 +25,17 @@ type UsbDevice = {
   claimInterface(n: number): Promise<void>
   releaseInterface(n: number): Promise<void>
   selectAlternateInterface(i: number, a: number): Promise<void>
-  transferOut(endpoint: number, data: BufferSource): Promise<{ status: string; bytesWritten: number }>
+  transferOut(endpoint: number, data: BufferSource): Promise<{ status: "ok" | "stall" | "babble"; bytesWritten: number }>
+  clearHalt(direction: "in" | "out", endpoint: number): Promise<void>
 }
 type UsbApi = {
   requestDevice(options: { filters: unknown[] }): Promise<UsbDevice>
   getDevices(): Promise<UsbDevice[]>
   addEventListener(type: "connect" | "disconnect", cb: (e: { device: UsbDevice }) => void): void
 }
+
+// la impresora ya abierta y la salida por donde le llegan los bytes
+type Link = { device: UsbDevice; iface: number; endpoint: number }
 
 export type PrinterStatus = "unsupported" | "disconnected" | "connecting" | "ready"
 
@@ -62,6 +66,8 @@ export const DEFAULT_SETTINGS: PrinterSettings = { cols: 42, asciiOnly: false, a
 const SETTINGS_KEY = "printer:settings"
 const LAST_KEY = "printer:last"
 const CHUNK = 4096
+// más que esto sin recibir datos ya no es una impresión lenta: es un atasco (sin papel, tapa abierta)
+const TRANSFER_TIMEOUT = 10_000
 
 export const OPEN_PRINTER_EVENT = "open-printer-settings"
 
@@ -73,7 +79,6 @@ const detailOf = (err: unknown) => {
 }
 
 let state: PrinterState = SERVER_STATE
-type Link = { device: UsbDevice; iface: number; endpoint: number }
 let active: Link | null = null
 let initialized = false
 const listeners = new Set<() => void>()
@@ -265,12 +270,54 @@ export const updatePrinterSettings = (partial: Partial<PrinterSettings>) => {
 // lee la conexión actual; una función evita que TypeScript la dé por nula tras reconectar
 const currentLink = (): Link | null => active
 
-const writeAll = async (link: Link, bytes: Uint8Array) => {
-  for (let i = 0; i < bytes.length; i += CHUNK) {
-    const result = await link.device.transferOut(link.endpoint, bytes.slice(i, i + CHUNK))
-    if (result.status !== "ok") throw new Error(`transferOut: ${result.status}`)
+const TIMEOUT_MESSAGE = "La impresora no respondió a tiempo"
+
+// WebUSB no tiene timeout: si la impresora deja de recibir (sin papel, tapa abierta), la transferencia no termina
+// nunca y las siguientes se quedan en cola detrás de ella. Al vencer el plazo se cierra el equipo: close() rechaza
+// lo pendiente y suelta la interfaz, y la próxima impresión lo vuelve a abrir.
+const sendChunk = async (link: Link, chunk: Uint8Array<ArrayBuffer>) => {
+  let timer: number | undefined
+  const expired = new Promise<never>((_, reject) => {
+    timer = window.setTimeout(() => {
+      // primero el rechazo: así el motivo que queda es el plazo y no el AbortError que provoca el cierre
+      reject(new Error(TIMEOUT_MESSAGE))
+      link.device.close().catch(() => { /* ya se estaba cerrando o se desconectó */ })
+    }, TRANSFER_TIMEOUT)
+  })
+  try {
+    let result = await Promise.race([link.device.transferOut(link.endpoint, chunk), expired])
+    // "stall": la impresora frenó la salida; se libera y se reenvía lo que no alcanzó a recibir
+    if (result.status === "stall") {
+      await link.device.clearHalt("out", link.endpoint)
+      result = await Promise.race([link.device.transferOut(link.endpoint, chunk.slice(result.bytesWritten)), expired])
+    }
+    if (result.status !== "ok") throw new Error(result.status)
+  } finally {
+    window.clearTimeout(timer)
   }
 }
+
+// `started` dice si ya salió algún pedazo del tiquete antes de fallar
+class WriteFailure extends Error {
+  constructor(public started: boolean, public original: unknown) {
+    super(detailOf(original))
+  }
+}
+
+const writeAll = async (link: Link, bytes: Uint8Array) => {
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    try {
+      await sendChunk(link, bytes.slice(i, i + CHUNK))
+    } catch (err) {
+      throw new WriteFailure(i > 0, err)
+    }
+  }
+}
+
+// Fallar de inmediato, sin haber enviado nada y sin esperar el plazo, es una conexión vieja (por ejemplo el puerto
+// USB de la tablet dormido). Si ya salió algo o venció el plazo no se reintenta: saldría el tiquete duplicado.
+const isStaleConnection = (err: unknown) =>
+  err instanceof WriteFailure && !err.started && (err.original as { message?: string })?.message !== TIMEOUT_MESSAGE
 
 export const printOps = async (ops: Op[]) => {
   if (!usbApi()) throw new PrinterError("UNSUPPORTED", "Este navegador no puede imprimir por USB. Usa Chrome.")
@@ -279,31 +326,37 @@ export const printOps = async (ops: Op[]) => {
   if (!link) throw new PrinterError("NOT_CONNECTED", "La impresora no está conectada. Conéctala en «Impresora».")
 
   const bytes = renderEscPos(ops, { cols: state.settings.cols, asciiOnly: state.settings.asciiOnly })
+  let used = link
   try {
-    await writeAll(link, bytes)
-  } catch (first) {
-    // la tablet puede haber dormido el puerto USB y dejado la conexión vieja: se reabre una vez y se reintenta
-    await releaseQuietly(link.device, link.iface)
-    active = null
-    await reconnectPrinter()
     try {
+      await writeAll(used, bytes)
+    } catch (first) {
+      if (!isStaleConnection(first)) throw first
+      // se reabre la conexión y se reintenta una sola vez
+      await releaseQuietly(used.device, used.iface)
+      active = null
+      await reconnectPrinter()
       const fresh = currentLink()
       if (!fresh) throw first
-      await writeAll(fresh, bytes)
-    } catch (err) {
-      const last = currentLink()
+      used = fresh
+      await writeAll(used, bytes)
+    }
+  } catch (err) {
+    const original = err instanceof WriteFailure ? err.original : err
+    // si mientras tanto se desconectó y se volvió a conectar, la conexión nueva no se toca
+    if (currentLink() === used) {
       active = null
-      if (last) await releaseQuietly(last.device, last.iface)
+      await releaseQuietly(used.device, used.iface)
       set({
         status: "disconnected", deviceName: "",
-        error: "Se perdió la conexión con la impresora.",
-        detail: `primer intento: ${detailOf(first)} · segundo: ${detailOf(err)}`,
+        error: "La impresora no respondió. Revisa el papel, la tapa y el cable.",
+        detail: detailOf(original),
       })
-      throw new PrinterError(
-        "WRITE_FAILED",
-        "No se pudo imprimir. Revisa que la impresora esté encendida, con papel, con la tapa cerrada y con el cable conectado."
-      )
     }
+    throw new PrinterError(
+      "WRITE_FAILED",
+      "No se pudo imprimir. Revisa que la impresora esté encendida, con papel y la tapa cerrada, y que el cable esté conectado."
+    )
   }
 }
 
@@ -346,8 +399,13 @@ const init = () => {
   const usb = usbApi()
   set({ settings, status: usb ? "disconnected" : "unsupported" })
   if (!usb) return
-  usb.addEventListener("connect", () => { void reconnectPrinter() })
-  usb.addEventListener("disconnect", () => {
+  usb.addEventListener("connect", () => {
+    // con la impresora ya lista, lo que se conectó es otro aparato
+    if (!active) void reconnectPrinter()
+  })
+  usb.addEventListener("disconnect", e => {
+    // un lector de códigos o un teclado en el mismo adaptador OTG no es la impresora
+    if (e.device !== active?.device) return
     active = null
     set({ status: "disconnected", deviceName: "" })
   })

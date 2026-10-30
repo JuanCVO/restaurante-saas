@@ -8,6 +8,7 @@
     "build": "prisma generate && tsc",
     "start": "prisma migrate deploy && node dist/index.js",
     "create-admin": "tsx scripts/create-restaurant.ts",
+    "set-plan": "tsx scripts/set-plan.ts",
     "test": "tsx --test src/**/*.test.ts"
   },
   "keywords": [],

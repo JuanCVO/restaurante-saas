@@ -5,6 +5,7 @@ import { Moon, Trash2 } from "lucide-react"
 
 import api from "@/lib/axios"
 import { useCurrentUser } from "@/lib/auth"
+import { hasFeature } from "@/lib/tenant"
 import { apiMessage } from "@/lib/errors"
 import { cop, copMinus, shortDate, timeOfDay } from "@/lib/format"
 import { cn } from "@/lib/utils"
@@ -42,6 +43,8 @@ const sum = <T,>(items: T[], pick: (item: T) => number) => items.reduce((s, i) =
 export default function DashboardPage() {
   const toast = useToast()
   const { user, token, restaurantId } = useCurrentUser()
+  // sin esa funcionalidad en el plan, el servidor rechaza esas dos consultas: ni se piden
+  const hasCash = hasFeature(user, "cash_management")
   const restaurantName = user?.restaurantName ?? ""
 
   const [stats, setStats] = useState<DashboardStats | null>(null)
@@ -75,8 +78,8 @@ export default function DashboardPage() {
       api.get(`orders/stats/${restaurantId}`),
       api.get(`orders/history/${restaurantId}`),
       api.get(`daily-summary/history/${restaurantId}`),
-      api.get(`cash-movements/${restaurantId}`),
-      api.get(`employee-payments/${restaurantId}`),
+      hasCash ? api.get(`cash-movements/${restaurantId}`) : Promise.resolve({ data: [] }),
+      hasCash ? api.get(`employee-payments/${restaurantId}`) : Promise.resolve({ data: [] }),
     ])
     const [s, h, sm, mv, pay] = results
     if (s.status === "fulfilled") setStats(s.value.data)
@@ -87,7 +90,7 @@ export default function DashboardPage() {
     const failed = results.find(r => r.status === "rejected") as PromiseRejectedResult | undefined
     if (failed) toast.error(apiMessage(failed.reason, "No se pudieron cargar algunos datos del dashboard."))
     setLoaded(true)
-  }, [restaurantId, toast])
+  }, [restaurantId, hasCash, toast])
 
   useEffect(() => {
     if (!restaurantId || !token) return

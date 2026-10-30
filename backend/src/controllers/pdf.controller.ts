@@ -1,4 +1,5 @@
 import { Request, Response } from "express";
+import { sendError } from "../lib/errors"
 import { prisma } from "../lib/prisma";
 import PDFDocument from "pdfkit";
 
@@ -69,7 +70,7 @@ export const downloadTodayPDF = async (req: Request, res: Response) => {
     })
 
     if (!summary) {
-      return res.status(404).json({ message: "No hay resumen del día para exportar." })
+      return sendError(res, "NO_SUMMARY")
     }
 
     const restaurant = await prisma.restaurant.findUnique({ where: { id: restaurantId } })
@@ -170,7 +171,8 @@ export const downloadTodayPDF = async (req: Request, res: Response) => {
     doc.end()
   } catch (error) {
     console.error(error)
-    return res.status(500).json({ message: "Error al generar el PDF del día." })
+    if (res.headersSent) return res.end()
+    return sendError(res, "PDF_FAILED")
   }
 }
 
@@ -186,7 +188,7 @@ export const downloadSummaryPDF = async (req: Request, res: Response) => {
     })
 
     if (summaries.length === 0) {
-      return res.status(400).json({ message: "No hay cierres guardados para exportar. Cierra al menos un día." })
+      return sendError(res, "NO_CLOSINGS")
     }
 
     const until = new Date(Math.max(...summaries.map(s => s.createdAt.getTime())))
@@ -320,6 +322,7 @@ export const downloadSummaryPDF = async (req: Request, res: Response) => {
     doc.end()
   } catch (error) {
     console.error(error)
-    return res.status(500).json({ message: "Error al generar el PDF." })
+    if (res.headersSent) return res.end()
+    return sendError(res, "PDF_FAILED")
   }
 }

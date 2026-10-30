@@ -1,8 +1,7 @@
-import { PrismaClient } from "@prisma/client"
-import { prisma } from "./prisma"
+import { prisma, type Tx } from "./prisma"
 import { getColombiaDayRange } from "./date"
 
-type Db = { dailySummary: PrismaClient["dailySummary"] }
+type Db = Pick<Tx, "dailySummary">
 
 // "El día" es todo lo que pasó desde el último cierre, no el día del calendario; si no, una venta de las
 // 11:58 p. m. desaparece a medianoche. Si nunca se cerró, cuenta desde el inicio de ayer.

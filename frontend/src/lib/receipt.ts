@@ -14,6 +14,8 @@ export type ReceiptData = {
   items: ReceiptItem[]
   subtotal: number
   tip?: number
+  /** porcentaje de la propina sugerida en la cuenta; 10 si no se indica */
+  tipPercent?: number
   paymentMethod?: string
   footer?: string
 }
@@ -25,11 +27,13 @@ const fmtDate = (d: Date) =>
     day: "2-digit", month: "2-digit", year: "numeric", hour: "numeric", minute: "2-digit", timeZone: "America/Bogota",
   })
 
-// Propina cercana al 10 % que deja el TOTAL en billetes (múltiplo de 1.000), para no dar vueltos en monedas:
+// Propina cercana al porcentaje del restaurante (10 % si no cambió) que deja el TOTAL en billetes (múltiplo de 1.000), para no dar vueltos en monedas:
 // 53.500 -> 5.500 (total 59.000), 15.500 -> 1.500 (total 17.000). Si el total queda justo entre dos billetes,
 // se baja (155.000 -> 15.000). Todo con enteros, para que no estorben los decimales.
-export const suggestedTip = (subtotal: number) => {
-  const total = Math.ceil((subtotal * 11 - 5000) / 10000) * 1000
+export const suggestedTip = (subtotal: number, percent = 10) => {
+  // sin porcentaje no hay propina que sugerir (redondear el total a billetes no es una propina)
+  if (percent <= 0) return 0
+  const total = Math.ceil((subtotal * (100 + percent) - 50000) / 100000) * 1000
   return Math.max(total - subtotal, 0)
 }
 
@@ -57,10 +61,11 @@ export const buildReceipt = (d: ReceiptData): Op[] => {
     ops.push({ t: "row", left: "TOTAL", right: cop(d.subtotal + tip), bold: true, big: true })
     if (d.paymentMethod) ops.push({ t: "row", left: "Pago", right: d.paymentMethod })
   } else {
-    const tip = suggestedTip(d.subtotal)
+    const percent = d.tipPercent ?? 10
+    const tip = suggestedTip(d.subtotal, percent)
     ops.push({ t: "row", left: "TOTAL", right: cop(d.subtotal), bold: true, big: true })
     if (tip > 0) {
-      ops.push({ t: "text", text: `Propina voluntaria sugerida (10%): ${cop(tip)}` })
+      ops.push({ t: "text", text: `Propina voluntaria sugerida (${percent}%): ${cop(tip)}` })
       ops.push({ t: "text", text: `Total con propina: ${cop(d.subtotal + tip)}` })
     }
   }
