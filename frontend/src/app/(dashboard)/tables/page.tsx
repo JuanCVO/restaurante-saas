@@ -11,6 +11,7 @@ import { cop, elapsed, isToday } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { OPEN_PRINTER_EVENT, PrinterError, usePrinter } from "@/lib/printer"
 import { buildReceipt, suggestedTip, type ReceiptData } from "@/lib/receipt"
+import { quickCashAmounts } from "@/lib/cash"
 import type { Table, Order, OrderItem } from "@/types/api"
 import TopBar from "@/components/ui/layout/TopBar"
 import { Button } from "@/components/ui/button"
@@ -82,6 +83,8 @@ export default function TablesPage() {
   const [tipAmount, setTipAmount] = useState(0)
   // lo que se escribe en «Otro valor»; aparte de tipAmount para no borrar el campo mientras se teclea
   const [tipText, setTipText] = useState("")
+  // pago en efectivo: con cuánto paga el cliente, para calcular la devuelta
+  const [receivedText, setReceivedText] = useState("")
   const [submitting, setSubmitting] = useState(false)
 
   const [confirm, setConfirm] = useState<ConfirmState | null>(null)
@@ -135,6 +138,7 @@ export default function TablesPage() {
     setTransferMethod("")
     setTipAmount(0)
     setTipText("")
+    setReceivedText("")
     setProductSearch("")
     setCategoryFilter("Todas")
     setPane("products")
@@ -165,6 +169,7 @@ export default function TablesPage() {
       setTransferMethod("")
       setTipAmount(0)
       setTipText("")
+      setReceivedText("")
       setModalOpen(true)
     } catch (err) {
       toast.error(apiMessage(err, "No se pudo abrir la mesa."))
@@ -293,8 +298,13 @@ export default function TablesPage() {
     if (!activeOrder || !selectedTable || !paymentMethod || !paymentValid || submitting || pending > 0) return
     setSubmitting(true)
     // se arma antes de cerrar, con la comanda todavía abierta
+    const withChange = cashDue > 0 && received >= cashDue
     const ticket = canPrint && printer.settings.autoPrint && printer.status === "ready"
-      ? receiptOps("pago", { paymentMethod: paymentLabel, tip: tipAmount })
+      ? receiptOps("pago", {
+          paymentMethod: paymentLabel,
+          tip: tipAmount,
+          ...(withChange ? { cashReceived: received, change } : {}),
+        })
       : null
     try {
       await api.patch(`/orders/${activeOrder.id}/close`, {
@@ -302,7 +312,10 @@ export default function TablesPage() {
         tip: tipAmount,
         ...(isMixed ? { cashAmount: cashPaid, transferMethod } : {}),
       })
-      toast.success(`Mesa ${selectedTable.number} cerrada · ${cop(activeOrder.total + tipAmount)}`)
+      toast.success(
+        `Mesa ${selectedTable.number} cerrada · ${cop(activeOrder.total + tipAmount)}` +
+        (withChange && change > 0 ? ` · Devuelta ${cop(change)}` : "")
+      )
       resetComanda()
       if (ticket) printer.print(ticket).catch(reportPrintError)
       await fetchTables()
@@ -407,6 +420,7 @@ export default function TablesPage() {
   const openPayment = () => {
     setTipAmount(tenPercent)
     setTipText("")
+    setReceivedText("")
     setShowPayment(true)
   }
   const pickTip = (amount: number) => {
@@ -415,8 +429,15 @@ export default function TablesPage() {
   }
   const isMixed = paymentMethod === "Mixto"
   const transferPart = Math.max(subtotal - cashPaid, 0)
+  // lo que se paga en efectivo: todo (con propina) si es efectivo; en el mixto, solo la parte en efectivo
+  const cashDue = paymentMethod === "Efectivo" ? totalWithTip : isMixed ? cashPaid : 0
+  const received = Number(receivedText) || 0
+  const change = received - cashDue
+  // si se escribió con cuánto paga y no alcanza, no se deja cobrar
+  const cashShort = cashDue > 0 && received > 0 && received < cashDue
+  const cashOptions = quickCashAmounts(cashDue)
   // en el mixto el efectivo va entre 0 y el total, y hay que decir por dónde se pagó el resto
-  const paymentValid = !isMixed || (cashPaid > 0 && cashPaid < subtotal && transferMethod !== "")
+  const paymentValid = (!isMixed || (cashPaid > 0 && cashPaid < subtotal && transferMethod !== "")) && !cashShort
   const paymentLabel = isMixed
     ? `Efectivo ${cop(cashPaid)} + ${transferMethod || "transferencia"} ${cop(transferPart)}`
     : paymentMethod
@@ -822,6 +843,49 @@ export default function TablesPage() {
                     />
                     <p className="mt-1.5 text-sm text-faint">La propina es para el personal y no entra a los ingresos.</p>
                   </div>
+
+                  {cashDue > 0 && (
+                    <div className="flex flex-col gap-3 rounded-lg bg-surface-2 p-3">
+                      <div className="flex items-baseline justify-between gap-3">
+                        <h3 className="font-display text-base font-bold">¿Con cuánto paga?</h3>
+                        <span className="text-sm text-soft tnum">
+                          {isMixed ? "En efectivo" : "A pagar"} {cop(cashDue)}
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        {cashOptions.map(value => (
+                          <button
+                            key={value}
+                            onClick={() => setReceivedText(String(value))}
+                            aria-pressed={received === value}
+                            className={cn(
+                              "h-11 rounded-md text-sm font-semibold tnum transition-colors",
+                              received === value ? "bg-brand text-brand-ink" : "bg-surface text-soft hover:text-ink"
+                            )}
+                          >
+                            {value === cashDue ? `Exacto · ${cop(value)}` : cop(value)}
+                          </button>
+                        ))}
+                      </div>
+                      <Input
+                        type="number"
+                        inputMode="numeric"
+                        min={0}
+                        value={receivedText}
+                        onChange={e => setReceivedText(e.target.value)}
+                        placeholder="Otro valor"
+                        aria-label="Con cuánto paga el cliente"
+                      />
+                      {received > 0 && (cashShort ? (
+                        <p className="text-sm font-semibold text-warn">Faltan {cop(cashDue - received)}</p>
+                      ) : (
+                        <div className="flex items-baseline justify-between">
+                          <span className="font-semibold">Devuelta</span>
+                          <span className="font-display text-2xl font-extrabold tnum text-good">{cop(change)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -835,6 +899,9 @@ export default function TablesPage() {
                     <span className="font-semibold">Total a cobrar</span>
                     <span className="font-display text-2xl font-extrabold tnum">{cop(totalWithTip)}</span>
                   </div>
+                  {cashDue > 0 && received > 0 && !cashShort && (
+                    <div className="flex justify-between"><span className="text-soft">Devuelta</span><span className="font-semibold tnum text-good">{cop(change)}</span></div>
+                  )}
                 </div>
               ) : (
                 <div className="flex items-baseline justify-between">

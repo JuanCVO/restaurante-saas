@@ -17,6 +17,9 @@ export type ReceiptData = {
   /** porcentaje de la propina sugerida en la cuenta; 10 si no se indica */
   tipPercent?: number
   paymentMethod?: string
+  /** pago en efectivo: con cuánto pagó el cliente y cuánto se le devolvió */
+  cashReceived?: number
+  change?: number
   footer?: string
 }
 
@@ -60,6 +63,10 @@ export const buildReceipt = (d: ReceiptData): Op[] => {
     if (tip > 0) ops.push({ t: "row", left: "Propina", right: cop(tip) })
     ops.push({ t: "row", left: "TOTAL", right: cop(d.subtotal + tip), bold: true, big: true })
     if (d.paymentMethod) ops.push({ t: "row", left: "Pago", right: d.paymentMethod })
+    if (d.cashReceived && d.cashReceived > 0) {
+      ops.push({ t: "row", left: "Recibido en efectivo", right: cop(d.cashReceived) })
+      ops.push({ t: "row", left: "Devuelta", right: cop(Math.max(d.change ?? 0, 0)), bold: true })
+    }
   } else {
     const percent = d.tipPercent ?? 10
     const tip = suggestedTip(d.subtotal, percent)

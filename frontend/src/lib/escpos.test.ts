@@ -118,3 +118,23 @@ test("comprobante de pago trae subtotal, propina, total, método y pie", () => {
     assert.ok(text.includes(piece), `falta ${piece}`)
   }
 })
+
+test("comprobante de pago en efectivo trae con cuánto pagó y la devuelta, solo si se anotó", () => {
+  const base = {
+    kind: "pago" as const,
+    restaurant: "La Fogata",
+    table: 4,
+    orderCode: "a41f9c02",
+    date: new Date("2026-09-30T02:15:00Z"),
+    items: [{ name: "Bandeja paisa", quantity: 2, unitPrice: 34000 }],
+    subtotal: 68000,
+    tip: 7000,
+    paymentMethod: "Efectivo",
+  }
+  const conDevuelta = renderPlain(buildReceipt({ ...base, cashReceived: 100000, change: 25000 }), { cols: 42 })
+  assert.match(conDevuelta, /Recibido en efectivo\s+\$100\.000/)
+  assert.match(conDevuelta, /Devuelta\s+\$25\.000/)
+
+  const sinDevuelta = renderPlain(buildReceipt(base), { cols: 42 })
+  assert.ok(!sinDevuelta.includes("Devuelta"))
+})

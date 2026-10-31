@@ -31,19 +31,21 @@ const drawDivider = (doc: PDFKit.PDFDocument, color = "#eeeeee") => {
   doc.moveDown(0.7)
 }
 
-// Cierre de la caja: solo el efectivo. Base + ventas en efectivo − compras y gastos pagados en efectivo.
-const drawCashClose = (
-  doc: PDFKit.PDFDocument,
-  v: { base: number; efectivo: number; compras: number; gastos: number },
-  title = "Cierre de caja (solo efectivo)"
-) => {
+type CashBox = { base: number; efectivo: number; compras: number; gastos: number; sueldos: number }
+
+// Base + ventas en efectivo − compras, gastos y sueldos pagados en efectivo
+const cashInBox = (v: CashBox) => v.base + v.efectivo - v.compras - v.gastos - v.sueldos
+
+// Cierre de la caja: solo el efectivo. Lo pagado por Nequi o Bancolombia no sale de la caja.
+const drawCashClose = (doc: PDFKit.PDFDocument, v: CashBox, title = "Cierre de caja (solo efectivo)") => {
   doc.fontSize(13).font("Helvetica-Bold").fillColor("#000000").text(title)
   doc.moveDown(0.4)
   drawRow(doc, "Base de caja",                 `+ ${col(v.base)}`,     "#3498db")
   drawRow(doc, "Ventas en efectivo",           `+ ${col(v.efectivo)}`, "#27ae60")
   drawRow(doc, "Compras pagadas en efectivo",  `- ${col(v.compras)}`,  "#e74c3c")
   drawRow(doc, "Gastos pagados en efectivo",   `- ${col(v.gastos)}`,   "#e74c3c")
-  drawRow(doc, "Efectivo en caja", col(v.base + v.efectivo - v.compras - v.gastos), "#000000", true)
+  drawRow(doc, "Sueldos pagados en efectivo",  `- ${col(v.sueldos)}`,  "#8e44ad")
+  drawRow(doc, "Efectivo en caja", col(cashInBox(v)), "#000000", true)
 }
 
 const drawFooter = (doc: PDFKit.PDFDocument) => {
@@ -125,8 +127,11 @@ export const downloadTodayPDF = async (req: Request, res: Response) => {
     doc.fontSize(13).font("Helvetica-Bold").fillColor("#000000").text("Sueldos pagados del día")
     doc.moveDown(0.4)
     const totalPagosEmpleados = summary.totalPagosEmpleados ?? 0
+    const sueldosEfectivo     = summary.sueldosEfectivo ?? 0
     if (totalPagosEmpleados > 0) {
       drawRow(doc, "Total sueldos (descontados)", col(totalPagosEmpleados), "#8e44ad")
+      drawRow(doc, "   En efectivo (de la caja)", col(sueldosEfectivo))
+      drawRow(doc, "   Por Nequi o Bancolombia",  col(Math.max(totalPagosEmpleados - sueldosEfectivo, 0)))
     } else {
       doc.fontSize(11).font("Helvetica").fillColor("#aaaaaa").text("  Sin sueldos registrados")
       doc.moveDown(0.35)
@@ -141,6 +146,9 @@ export const downloadTodayPDF = async (req: Request, res: Response) => {
     const propEntregadas = summary.propinasEntregadas ?? 0
     drawRow(doc, "Cobradas",     col(propCobradas), "#27ae60")
     drawRow(doc, "Entregadas",   col(propEntregadas))
+    if (propEntregadas > 0) {
+      drawRow(doc, "   En efectivo (de la caja)", col(summary.propinasEntregadasEfectivo ?? 0))
+    }
     drawRow(doc, "Por entregar", col(Math.max(propCobradas - propEntregadas, 0)), "#27ae60", true)
 
     drawDivider(doc, "#dddddd")
@@ -165,6 +173,7 @@ export const downloadTodayPDF = async (req: Request, res: Response) => {
       efectivo: summary.efectivo,
       compras: summary.comprasEfectivo ?? 0,
       gastos: summary.gastosEfectivo ?? 0,
+      sueldos: sueldosEfectivo,
     })
 
     drawFooter(doc)
@@ -239,6 +248,7 @@ export const downloadSummaryPDF = async (req: Request, res: Response) => {
     const totalGastos         = summaries.reduce((s, d) => s + (d.totalGastos ?? 0), 0)
     const totalCompras        = summaries.reduce((s, d) => s + (d.totalCompras ?? 0), 0)
     const totalPagosEmpleados = summaries.reduce((s, d) => s + (d.totalPagosEmpleados ?? 0), 0)
+    const totalSueldosEf      = summaries.reduce((s, d) => s + (d.sueldosEfectivo ?? 0), 0)
     const totalBase           = summaries.reduce((s, d) => s + (d.baseCaja ?? 0), 0)
     const ventasBrutas        = totalEfectivo + totalBancolombia + totalNequi
 
@@ -260,7 +270,7 @@ export const downloadSummaryPDF = async (req: Request, res: Response) => {
 
     drawDivider(doc, "#cccccc")
 
-    drawCashClose(doc, { base: totalBase, efectivo: totalEfectivo, compras: totalComprasEf, gastos: totalGastosEf })
+    drawCashClose(doc, { base: totalBase, efectivo: totalEfectivo, compras: totalComprasEf, gastos: totalGastosEf, sueldos: totalSueldosEf })
 
     drawDivider(doc, "#cccccc")
 
@@ -274,7 +284,13 @@ export const downloadSummaryPDF = async (req: Request, res: Response) => {
       const pagosDia    = summary.totalPagosEmpleados ?? 0
       const baseCajaDia = summary.baseCaja ?? 0
       const ventasDia   = summary.efectivo + summary.bancolombia + summary.nequi
-      const cajaDia     = baseCajaDia + summary.efectivo - (summary.comprasEfectivo ?? 0) - (summary.gastosEfectivo ?? 0)
+      const cajaDia     = cashInBox({
+        base: baseCajaDia,
+        efectivo: summary.efectivo,
+        compras: summary.comprasEfectivo ?? 0,
+        gastos: summary.gastosEfectivo ?? 0,
+        sueldos: summary.sueldosEfectivo ?? 0,
+      })
 
       doc.fontSize(11).font("Helvetica-Bold").fillColor("#e67e22").text(fmtDate(summary.date))
       doc.fontSize(10).font("Helvetica").fillColor("#333333")
@@ -315,7 +331,7 @@ export const downloadSummaryPDF = async (req: Request, res: Response) => {
     }
     for (const p of payments) {
       doc.fontSize(10).font("Helvetica").fillColor("#333333")
-        .text(`${fmtShort(p.createdAt)}   ${p.user.name}   Sueldo: ${col(p.salary)}${p.tip > 0 ? `   Propina: ${col(p.tip)}` : ""}${p.notes ? `   (${p.notes})` : ""}`)
+        .text(`${fmtShort(p.createdAt)}   ${p.user.name}   Sueldo: ${col(p.salary)}${p.tip > 0 ? `   Propina: ${col(p.tip)}` : ""}   ${p.paymentMethod}${p.notes ? `   (${p.notes})` : ""}`)
     }
 
     drawFooter(doc)

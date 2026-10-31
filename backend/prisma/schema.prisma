@@ -171,6 +171,9 @@ model DailySummary {
   comprasEfectivo     Float    @default(0)
   gastosEfectivo      Float    @default(0)
   propinasEntregadas  Float    @default(0)
+  // lo que se les pagó a los empleados con efectivo de la caja
+  sueldosEfectivo            Float    @default(0)
+  propinasEntregadasEfectivo Float    @default(0)
   baseCaja            Float    @default(0)
   restaurantId        String
   restaurant      Restaurant @relation(fields: [restaurantId], references: [id])
@@ -208,6 +211,8 @@ model EmployeePayment {
   restaurant   Restaurant @relation(fields: [restaurantId], references: [id])
   salary       Float      @default(0)
   tip          Float      @default(0)
+  // "Efectivo" sale de la caja; "Nequi" o "Bancolombia" es transferencia
+  paymentMethod String    @default("Efectivo")
   notes        String?
   createdAt    DateTime   @default(now())
 

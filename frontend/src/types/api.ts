@@ -113,6 +113,8 @@ export type EmployeePayment = {
   restaurantId: string
   salary: number
   tip: number
+  /** "Efectivo" sale de la caja; "Nequi" o "Bancolombia" es transferencia */
+  paymentMethod: string
   notes: string | null
   createdAt: string
   user: { name: string; role: Role }
@@ -144,6 +146,8 @@ export type DailySummary = {
   comprasEfectivo?: number
   gastosEfectivo?: number
   propinasEntregadas?: number
+  sueldosEfectivo?: number
+  propinasEntregadasEfectivo?: number
   baseCaja: number
   efectivo: number
   bancolombia: number

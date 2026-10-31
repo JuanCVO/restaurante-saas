@@ -23,6 +23,7 @@ export const createEmployeePayment = asyncHandler(async (req: Request, res: Resp
       restaurantId: data.restaurantId,
       salary: data.salary,
       tip: data.tip ?? 0,
+      paymentMethod: data.paymentMethod,
       notes: data.notes ?? null,
     },
     include: { user: { select: { name: true, role: true } } },

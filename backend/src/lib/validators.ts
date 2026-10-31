@@ -34,6 +34,8 @@ export const EmployeePaymentSchema = z.object({
   restaurantId: z.string().uuid(),
   salary: z.number().min(0).max(1_000_000_000),
   tip: z.number().min(0).max(1_000_000_000).optional(),
+  // con qué se le pagó: el efectivo sale de la caja y se descuenta en el cierre de caja
+  paymentMethod: z.enum(["Efectivo", "Nequi", "Bancolombia"]).default("Efectivo"),
   notes: z.string().max(400).optional().nullable(),
 })
 

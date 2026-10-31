@@ -27,13 +27,14 @@ export const closeDayForRestaurant = async (restaurantId: string): Promise<Close
       include: { items: { select: { quantity: true } } },
     })
 
-    const [baseAgg, gastosAgg, comprasAgg, gastosEfAgg, comprasEfAgg, pagosAgg, firstMovement, firstPayment] = await Promise.all([
+    const [baseAgg, gastosAgg, comprasAgg, gastosEfAgg, comprasEfAgg, pagosAgg, pagosEfAgg, firstMovement, firstPayment] = await Promise.all([
       tx.cashMovement.aggregate({ where: { restaurantId, type: "BASE_CAJA", createdAt: after }, _sum: { amount: true } }),
       tx.cashMovement.aggregate({ where: { restaurantId, type: "GASTO", createdAt: after }, _sum: { amount: true } }),
       tx.cashMovement.aggregate({ where: { restaurantId, type: "COMPRA", createdAt: after }, _sum: { amount: true } }),
       tx.cashMovement.aggregate({ where: { restaurantId, type: "GASTO", paymentMethod: "Efectivo", createdAt: after }, _sum: { amount: true } }),
       tx.cashMovement.aggregate({ where: { restaurantId, type: "COMPRA", paymentMethod: "Efectivo", createdAt: after }, _sum: { amount: true } }),
       tx.employeePayment.aggregate({ where: { restaurantId, createdAt: after }, _sum: { salary: true, tip: true } }),
+      tx.employeePayment.aggregate({ where: { restaurantId, paymentMethod: "Efectivo", createdAt: after }, _sum: { salary: true, tip: true } }),
       tx.cashMovement.findFirst({ where: { restaurantId, createdAt: after }, orderBy: { createdAt: "asc" }, select: { createdAt: true } }),
       tx.employeePayment.findFirst({ where: { restaurantId, createdAt: after }, orderBy: { createdAt: "asc" }, select: { createdAt: true } }),
     ])
@@ -45,6 +46,8 @@ export const closeDayForRestaurant = async (restaurantId: string): Promise<Close
     const comprasEfectivo     = comprasEfAgg._sum.amount ?? 0
     const totalPagosEmpleados = pagosAgg._sum.salary ?? 0
     const propinasEntregadas  = pagosAgg._sum.tip ?? 0
+    const sueldosEfectivo            = pagosEfAgg._sum.salary ?? 0
+    const propinasEntregadasEfectivo = pagosEfAgg._sum.tip ?? 0
 
     const nothingToClose =
       orders.length === 0 && baseCaja === 0 && totalGastos === 0 &&
@@ -75,6 +78,8 @@ export const closeDayForRestaurant = async (restaurantId: string): Promise<Close
       comprasEfectivo,
       totalPagosEmpleados,
       propinasEntregadas,
+      sueldosEfectivo,
+      propinasEntregadasEfectivo,
       baseCaja,
     }
 
@@ -99,6 +104,8 @@ export const closeDayForRestaurant = async (restaurantId: string): Promise<Close
             comprasEfectivo:     { increment: data.comprasEfectivo },
             totalPagosEmpleados: { increment: data.totalPagosEmpleados },
             propinasEntregadas:  { increment: data.propinasEntregadas },
+            sueldosEfectivo:     { increment: data.sueldosEfectivo },
+            propinasEntregadasEfectivo: { increment: data.propinasEntregadasEfectivo },
             baseCaja:            { increment: data.baseCaja },
             // hora del último cierre: desde aquí empieza el siguiente periodo
             createdAt: new Date(),

@@ -55,6 +55,8 @@ export default function PurchasesPage() {
   const [selectedEmployee, setSelectedEmployee] = useState("")
   const [salary, setSalary] = useState("")
   const [tipPago, setTipPago] = useState("")
+  // el efectivo sale de la caja y se descuenta en el cierre de caja; Nequi o Bancolombia no
+  const [methodPago, setMethodPago] = useState("Efectivo")
   const [notesPago, setNotesPago] = useState("")
 
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null)
@@ -150,6 +152,7 @@ export default function PurchasesPage() {
         restaurantId,
         salary: Number(salary),
         tip: Number(tipPago || 0),
+        paymentMethod: methodPago,
         notes: notesPago || null,
       })
       setSelectedEmployee("")
@@ -298,11 +301,18 @@ export default function PurchasesPage() {
                   ))}
                 </Select>
               </Field>
-              <Field label="Pago del día ($)" hint="Sale de la caja de hoy">
+              <Field label="Pago del día ($)" hint={methodPago === "Efectivo" ? "Sale de la caja de hoy" : "Por transferencia: no sale de la caja"}>
                 <Input type="number" inputMode="numeric" min={0} value={salary} onChange={e => setSalary(e.target.value)} placeholder="0" required />
               </Field>
               <Field label="Propina entregada ($)" hint="No cuenta como gasto">
                 <Input type="number" inputMode="numeric" min={0} value={tipPago} onChange={e => setTipPago(e.target.value)} placeholder="0" />
+              </Field>
+              <Field label="¿Cómo se le pagó?" className="sm:col-span-2">
+                <Select value={methodPago} onChange={e => setMethodPago(e.target.value)}>
+                  <option value="Efectivo">Efectivo (sale de la caja)</option>
+                  <option value="Nequi">Nequi</option>
+                  <option value="Bancolombia">Bancolombia</option>
+                </Select>
               </Field>
               <Field label="Notas (opcional)" className="sm:col-span-2">
                 <Input value={notesPago} onChange={e => setNotesPago(e.target.value)} placeholder="Observación" />
@@ -325,6 +335,7 @@ export default function PurchasesPage() {
                         <p className="text-sm text-soft tnum">
                           Pago {cop(p.salary)}
                           {p.tip > 0 && ` · Propina ${cop(p.tip)}`}
+                          {` · ${p.paymentMethod}`}
                           {p.notes && ` · ${p.notes}`}
                         </p>
                       </div>
