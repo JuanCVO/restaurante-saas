@@ -1,3 +1,4 @@
+// Punto de entrada del servidor
 import "./lib/env"
 import { sendError } from "./lib/errors"
 import express from "express"
