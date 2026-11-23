@@ -1,12 +1,16 @@
-import { Resend } from "resend"
+import nodemailer from "nodemailer"
 import { env } from "./env"
 
-// Sin RESEND_API_KEY el correo simplemente no se manda; se avisa una sola vez en el arranque, no en cada envío
-let client: Resend | null = null
-if (env.resendApiKey) {
-  client = new Resend(env.resendApiKey)
+// Sin GMAIL_USER/GMAIL_APP_PASSWORD el correo simplemente no se manda; se avisa una sola vez en el arranque,
+// no en cada envío. La contraseña es una "contraseña de aplicación" de Google, no la contraseña normal de la cuenta.
+let transporter: ReturnType<typeof nodemailer.createTransport> | null = null
+if (env.gmailUser && env.gmailAppPassword) {
+  transporter = nodemailer.createTransport({
+    service: "gmail",
+    auth: { user: env.gmailUser, pass: env.gmailAppPassword },
+  })
 } else {
-  console.warn("RESEND_API_KEY no está configurada: el correo del cierre del día no se enviará.")
+  console.warn("GMAIL_USER/GMAIL_APP_PASSWORD no están configuradas: el correo del cierre del día no se enviará.")
 }
 
 export type MailAttachment = { filename: string; content: Buffer }
@@ -20,16 +24,18 @@ export type SendMailInput = {
 
 // No lanza: quien llama decide qué hacer si no hay correo (normalmente, nada: el cierre ya quedó hecho)
 export const sendMail = async (input: SendMailInput): Promise<{ sent: boolean; error?: string }> => {
-  if (!client) return { sent: false, error: "RESEND_API_KEY no configurada" }
+  if (!transporter) return { sent: false, error: "GMAIL_USER/GMAIL_APP_PASSWORD no configuradas" }
 
-  const { error } = await client.emails.send({
-    from: env.resendFrom,
-    to: input.to,
-    subject: input.subject,
-    html: input.html,
-    attachments: input.attachments,
-  })
-
-  if (error) return { sent: false, error: error.message }
-  return { sent: true }
+  try {
+    await transporter.sendMail({
+      from: `RestaurantOS <${env.gmailUser}>`,
+      to: input.to,
+      subject: input.subject,
+      html: input.html,
+      attachments: input.attachments,
+    })
+    return { sent: true }
+  } catch (err) {
+    return { sent: false, error: err instanceof Error ? err.message : String(err) }
+  }
 }

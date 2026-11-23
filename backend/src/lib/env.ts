@@ -24,9 +24,9 @@ export const env = {
   corsOrigins: (process.env.CORS_ORIGINS ?? "").split(",").map(o => o.trim()).filter(Boolean),
   // si no se define, no se borra nada
   archiveRetentionDays: process.env.ARCHIVE_RETENTION_DAYS ? Number(process.env.ARCHIVE_RETENTION_DAYS) : null,
-  // sin esto, el correo del cierre simplemente no se manda (se avisa una vez en el log)
-  resendApiKey: process.env.RESEND_API_KEY || null,
-  // hasta no verificar un dominio propio en Resend, solo entrega al correo con el que se creó la cuenta
-  resendFrom: process.env.RESEND_FROM || "RestaurantOS <onboarding@resend.dev>",
+  // correo de Gmail desde el que se manda el cierre del día, con su contraseña de aplicación (no la normal)
+  // sin estas dos, el correo del cierre simplemente no se manda (se avisa una vez en el log)
+  gmailUser: process.env.GMAIL_USER || null,
+  gmailAppPassword: process.env.GMAIL_APP_PASSWORD || null,
   isProd: process.env.NODE_ENV === "production",
 }
