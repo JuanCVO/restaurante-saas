@@ -35,7 +35,7 @@ export const EmployeePaymentSchema = z.object({
   salary: z.number().min(0).max(1_000_000_000),
   tip: z.number().min(0).max(1_000_000_000).optional(),
   // con qué se le pagó: el efectivo sale de la caja y se descuenta en el cierre de caja
-  paymentMethod: z.enum(["Efectivo", "Nequi", "Bancolombia"]).default("Efectivo"),
+  paymentMethod: z.enum(["Efectivo", "Datafono", "Nequi", "Bancolombia"]).default("Efectivo"),
   notes: z.string().max(400).optional().nullable(),
 })
 
@@ -72,11 +72,11 @@ export const AddItemSchema = z.object({
 })
 
 export const CloseOrderSchema = z.object({
-  paymentMethod: z.enum(["Efectivo", "Nequi", "Bancolombia", "Mixto"]),
+  paymentMethod: z.enum(["Efectivo", "Datafono", "Nequi", "Bancolombia", "Mixto"]),
   tip: z.number().min(0).max(1_000_000_000).optional(),
   // solo en pago mixto: lo que se pagó en efectivo y por dónde se pagó el resto
   cashAmount: z.number().min(0).max(1_000_000_000).optional(),
-  transferMethod: z.enum(["Nequi", "Bancolombia"]).optional(),
+  transferMethod: z.enum(["Datafono", "Nequi", "Bancolombia"]).optional(),
 })
 
 export const CloseDaySchema = z.object({

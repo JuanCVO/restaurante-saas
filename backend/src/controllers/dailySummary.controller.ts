@@ -6,6 +6,7 @@ import { getOpenPeriod } from "../lib/period"
 import { asyncHandler } from "../lib/asyncHandler"
 import { BusinessError, HTTP } from "../lib/errors"
 import { closeDayForRestaurant, purgeOldArchivedOrders } from "../services/dailyClose.service"
+import { sendDailyCloseEmail } from "../services/dailyCloseEmail.service"
 import { audit } from "../lib/audit"
 
 export const closeDay = asyncHandler(async (req: Request, res: Response) => {
@@ -15,6 +16,8 @@ export const closeDay = asyncHandler(async (req: Request, res: Response) => {
 
   // limpieza opcional (ARCHIVE_RETENTION_DAYS); si falla, el cierre ya quedó hecho
   purgeOldArchivedOrders(restaurantId).catch(err => console.error("No se pudo limpiar órdenes archivadas", err))
+  // correo opcional al jefe (solo si hay plan con PDF y configuró un correo); si falla, el cierre ya quedó hecho
+  sendDailyCloseEmail(restaurantId, result.summary).catch(err => console.error("No se pudo enviar el correo del cierre", err))
 
   if (result.kind === "updated") {
     return res.status(HTTP.OK).json({ message: "Cierre del día actualizado.", summary: result.summary, updated: true })
@@ -76,6 +79,7 @@ export const getSummaryChart = asyncHandler(async (req: Request, res: Response) 
       propinas:  item.totalPropinas ?? 0,
       baseCaja:  item.baseCaja ?? 0,
       efectivo:  item.efectivo,
+      datafono:  item.datafono,
       bancolombia: item.bancolombia,
       nequi:     item.nequi,
     }

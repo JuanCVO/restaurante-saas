@@ -136,7 +136,7 @@ export default function DashboardPage() {
 
   const bars = useMemo(() => chartData.map(d => {
     const [, month, day] = d.date.slice(0, 10).split("-")
-    const value = metric === "ventas" ? d.efectivo + d.bancolombia + d.nequi : metric === "neto" ? d.ingresos : d.pedidos
+    const value = metric === "ventas" ? d.efectivo + d.datafono + d.bancolombia + d.nequi : metric === "neto" ? d.ingresos : d.pedidos
     return { label: `${day}/${month}`, value }
   }), [chartData, metric])
 

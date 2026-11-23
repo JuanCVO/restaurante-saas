@@ -2,7 +2,8 @@ import type { CurrentUser, Feature, TenantSettings } from "@/types/api"
 
 export const DEFAULT_SETTINGS: TenantSettings = {
   tipPercent: 10,
-  paymentMethods: ["Efectivo", "Nequi", "Bancolombia", "Mixto"],
+  paymentMethods: ["Efectivo", "Datafono", "Nequi", "Bancolombia", "Mixto"],
+  bossEmail: null,
 }
 
 // Sin sesión no hay nada que mostrar. Una sesión iniciada antes de existir los planes no trae tenant: se asume que

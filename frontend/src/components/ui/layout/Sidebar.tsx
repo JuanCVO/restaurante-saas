@@ -6,7 +6,7 @@ import Link from "next/link"
 import Image from "next/image"
 import {
   LayoutDashboard, Package, UtensilsCrossed, LogOut, ChefHat, Calendar,
-  TrendingUp, ShoppingCart, Moon, FileDown, Loader2, Users, Ellipsis, Printer,
+  TrendingUp, ShoppingCart, Moon, FileDown, Loader2, Users, Ellipsis, Printer, Settings,
   type LucideIcon,
 } from "lucide-react"
 
@@ -159,6 +159,12 @@ export default function Sidebar() {
                   <span className="max-lg:hidden">{pdfLoading ? "Descargando..." : "Descargar PDF"}</span>
                 </button>
               )}
+              {canPdf && (
+                <Link href="/settings" title="Ajustes" aria-label="Ajustes" className={cn(actionBtn, isActive("/settings") && "text-brand")}>
+                  <Settings size={18} className="shrink-0" />
+                  <span className="max-lg:hidden">Ajustes</span>
+                </Link>
+              )}
             </>
           )}
 
@@ -205,7 +211,7 @@ export default function Sidebar() {
           aria-label={isAdmin ? "Más opciones" : "Cerrar sesión"}
           className={cn(
             "flex min-h-16 flex-1 flex-col items-center justify-center gap-1 text-xs font-semibold transition-colors",
-            isAdmin && pathname.startsWith("/employees") ? "text-brand" : "text-soft"
+            isAdmin && (pathname.startsWith("/employees") || pathname.startsWith("/settings")) ? "text-brand" : "text-soft"
           )}
         >
           {isAdmin ? <Ellipsis size={22} /> : <LogOut size={22} />}
@@ -241,6 +247,15 @@ export default function Sidebar() {
             >
               <FileDown size={20} className="text-soft" /> Descargar PDF
             </button>
+          )}
+          {canPdf && (
+            <Link
+              href="/settings"
+              onClick={() => setMoreOpen(false)}
+              className="flex h-12 items-center gap-3 rounded-md px-3 text-base font-semibold hover:bg-surface-2"
+            >
+              <Settings size={20} className="text-soft" /> Ajustes
+            </Link>
           )}
           <button
             onClick={handleLogout}

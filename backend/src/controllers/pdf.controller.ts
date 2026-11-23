@@ -1,4 +1,5 @@
 import { Request, Response } from "express";
+import { DailySummary, Restaurant } from "@prisma/client";
 import { sendError } from "../lib/errors"
 import { prisma } from "../lib/prisma";
 import PDFDocument from "pdfkit";
@@ -36,7 +37,7 @@ type CashBox = { base: number; efectivo: number; compras: number; gastos: number
 // Base + ventas en efectivo − compras, gastos y sueldos pagados en efectivo
 const cashInBox = (v: CashBox) => v.base + v.efectivo - v.compras - v.gastos - v.sueldos
 
-// Cierre de la caja: solo el efectivo. Lo pagado por Nequi o Bancolombia no sale de la caja.
+// Cierre de la caja: solo el efectivo. Lo pagado por Datafono, Nequi o Bancolombia no sale de la caja.
 const drawCashClose = (doc: PDFKit.PDFDocument, v: CashBox, title = "Cierre de caja (solo efectivo)") => {
   doc.fontSize(13).font("Helvetica-Bold").fillColor("#000000").text(title)
   doc.moveDown(0.4)
@@ -62,6 +63,119 @@ const drawFooter = (doc: PDFKit.PDFDocument) => {
   )
 }
 
+// Dibuja el cierre del día sobre un documento ya creado; lo usan tanto la descarga por HTTP como el correo
+// al jefe, para que ambos muestren siempre exactamente lo mismo.
+const drawDailyClosePdf = (doc: PDFKit.PDFDocument, summary: DailySummary, restaurant: Restaurant | null) => {
+  const dateStr = summary.date.toLocaleDateString("es-CO", {
+    weekday: "long", year: "numeric", month: "long", day: "numeric",
+    timeZone: "America/Bogota",
+  })
+
+  // Encabezado
+  doc.fontSize(22).font("Helvetica-Bold").text(restaurant?.name ?? "Restaurante", { align: "center" })
+  doc.fontSize(12).font("Helvetica").fillColor("#666666").text("Cierre del día", { align: "center" })
+  doc.fontSize(11).fillColor("#e67e22").text(dateStr, { align: "center" })
+  doc.moveDown(1.5)
+
+  // Ventas
+  doc.fontSize(13).font("Helvetica-Bold").fillColor("#000000").text("Ventas del día")
+  doc.moveDown(0.4)
+  drawRow(doc, "Mesas cerradas",  `${summary.totalOrdenes}`)
+  drawRow(doc, "Platos vendidos", `${summary.totalPlatos}`)
+  drawRow(doc, "Efectivo",        col(summary.efectivo))
+  drawRow(doc, "Datafono",        col(summary.datafono))
+  drawRow(doc, "Bancolombia",     col(summary.bancolombia))
+  drawRow(doc, "Nequi",           col(summary.nequi))
+  const baseCajaPDF = summary.baseCaja ?? 0
+  if (baseCajaPDF > 0) {
+    drawRow(doc, "Base de caja", col(baseCajaPDF), "#3498db")
+  }
+
+  drawDivider(doc, "#dddddd")
+
+  // Gastos y compras
+  doc.fontSize(13).font("Helvetica-Bold").fillColor("#000000").text("Gastos y compras del día")
+  doc.moveDown(0.4)
+  const totalGastos  = summary.totalGastos ?? 0
+  const totalCompras = summary.totalCompras ?? 0
+  if (totalGastos > 0 || totalCompras > 0) {
+    if (totalGastos > 0)  drawRow(doc, "Gastos (descontados)",  col(totalGastos),  "#e74c3c")
+    if (totalCompras > 0) drawRow(doc, "Compras (descontadas)", col(totalCompras), "#e74c3c")
+  } else {
+    doc.fontSize(11).font("Helvetica").fillColor("#aaaaaa").text("  Sin gastos ni compras registrados")
+    doc.moveDown(0.35)
+  }
+
+  drawDivider(doc, "#dddddd")
+
+  // Pagos a empleados
+  doc.fontSize(13).font("Helvetica-Bold").fillColor("#000000").text("Sueldos pagados del día")
+  doc.moveDown(0.4)
+  const totalPagosEmpleados = summary.totalPagosEmpleados ?? 0
+  const sueldosEfectivo     = summary.sueldosEfectivo ?? 0
+  if (totalPagosEmpleados > 0) {
+    drawRow(doc, "Total sueldos (descontados)", col(totalPagosEmpleados), "#8e44ad")
+    drawRow(doc, "   En efectivo (de la caja)",          col(sueldosEfectivo))
+    drawRow(doc, "   Por Datafono, Nequi o Bancolombia",  col(Math.max(totalPagosEmpleados - sueldosEfectivo, 0)))
+  } else {
+    doc.fontSize(11).font("Helvetica").fillColor("#aaaaaa").text("  Sin sueldos registrados")
+    doc.moveDown(0.35)
+  }
+
+  drawDivider(doc, "#dddddd")
+
+  // Propinas: no son ingreso del restaurante
+  doc.fontSize(13).font("Helvetica-Bold").fillColor("#000000").text("Propinas (no cuentan como ingreso)")
+  doc.moveDown(0.4)
+  const propCobradas   = summary.totalPropinas ?? 0
+  const propEntregadas = summary.propinasEntregadas ?? 0
+  drawRow(doc, "Cobradas",     col(propCobradas), "#27ae60")
+  drawRow(doc, "Entregadas",   col(propEntregadas))
+  if (propEntregadas > 0) {
+    drawRow(doc, "   En efectivo (de la caja)", col(summary.propinasEntregadasEfectivo ?? 0))
+  }
+  drawRow(doc, "Por entregar", col(Math.max(propCobradas - propEntregadas, 0)), "#27ae60", true)
+
+  drawDivider(doc, "#dddddd")
+
+  // Resumen neto
+  doc.fontSize(13).font("Helvetica-Bold").fillColor("#000000").text("Resumen neto")
+  doc.moveDown(0.4)
+  const ventasBrutas = summary.efectivo + summary.datafono + summary.bancolombia + summary.nequi
+  drawRow(doc, "Ventas brutas",          col(ventasBrutas))
+  if (baseCajaPDF > 0) {
+    drawRow(doc, "Base de caja",         `+ ${col(baseCajaPDF)}`, "#3498db")
+  }
+  drawRow(doc, "Gastos",                 `- ${col(totalGastos)}`, "#e74c3c")
+  drawRow(doc, "Compras",                `- ${col(totalCompras)}`, "#e74c3c")
+  drawRow(doc, "Sueldos",                `- ${col(totalPagosEmpleados)}`, "#8e44ad")
+  drawRow(doc, "Neto del día",           col(summary.totalIngresos), "#27ae60", true)
+
+  drawDivider(doc, "#dddddd")
+
+  drawCashClose(doc, {
+    base: baseCajaPDF,
+    efectivo: summary.efectivo,
+    compras: summary.comprasEfectivo ?? 0,
+    gastos: summary.gastosEfectivo ?? 0,
+    sueldos: sueldosEfectivo,
+  })
+
+  drawFooter(doc)
+}
+
+// El mismo PDF del cierre, como buffer en memoria; lo usa el correo automático al jefe
+export const renderDailyClosePdf = (summary: DailySummary, restaurant: Restaurant | null): Promise<Buffer> =>
+  new Promise((resolve, reject) => {
+    const doc = new PDFDocument({ margin: 50 })
+    const chunks: Buffer[] = []
+    doc.on("data", chunk => chunks.push(chunk))
+    doc.on("end", () => resolve(Buffer.concat(chunks)))
+    doc.on("error", reject)
+    drawDailyClosePdf(doc, summary, restaurant)
+    doc.end()
+  })
+
 export const downloadTodayPDF = async (req: Request, res: Response) => {
   try {
     const restaurantId = req.params.restaurantId as string
@@ -78,105 +192,10 @@ export const downloadTodayPDF = async (req: Request, res: Response) => {
     const restaurant = await prisma.restaurant.findUnique({ where: { id: restaurantId } })
     const doc = new PDFDocument({ margin: 50 })
 
-    const dateStr = summary.date.toLocaleDateString("es-CO", {
-      weekday: "long", year: "numeric", month: "long", day: "numeric",
-      timeZone: "America/Bogota",
-    })
-
     res.setHeader("Content-Type", "application/pdf")
     res.setHeader("Content-Disposition", `attachment; filename=cierre-${Date.now()}.pdf`)
     doc.pipe(res)
-
-    // Encabezado
-    doc.fontSize(22).font("Helvetica-Bold").text(restaurant?.name ?? "Restaurante", { align: "center" })
-    doc.fontSize(12).font("Helvetica").fillColor("#666666").text("Cierre del día", { align: "center" })
-    doc.fontSize(11).fillColor("#e67e22").text(dateStr, { align: "center" })
-    doc.moveDown(1.5)
-
-    // Ventas
-    doc.fontSize(13).font("Helvetica-Bold").fillColor("#000000").text("Ventas del día")
-    doc.moveDown(0.4)
-    drawRow(doc, "Mesas cerradas",  `${summary.totalOrdenes}`)
-    drawRow(doc, "Platos vendidos", `${summary.totalPlatos}`)
-    drawRow(doc, "Efectivo",        col(summary.efectivo))
-    drawRow(doc, "Bancolombia",     col(summary.bancolombia))
-    drawRow(doc, "Nequi",           col(summary.nequi))
-    const baseCajaPDF = summary.baseCaja ?? 0
-    if (baseCajaPDF > 0) {
-      drawRow(doc, "Base de caja", col(baseCajaPDF), "#3498db")
-    }
-
-    drawDivider(doc, "#dddddd")
-
-    // Gastos y compras
-    doc.fontSize(13).font("Helvetica-Bold").fillColor("#000000").text("Gastos y compras del día")
-    doc.moveDown(0.4)
-    const totalGastos  = summary.totalGastos ?? 0
-    const totalCompras = summary.totalCompras ?? 0
-    if (totalGastos > 0 || totalCompras > 0) {
-      if (totalGastos > 0)  drawRow(doc, "Gastos (descontados)",  col(totalGastos),  "#e74c3c")
-      if (totalCompras > 0) drawRow(doc, "Compras (descontadas)", col(totalCompras), "#e74c3c")
-    } else {
-      doc.fontSize(11).font("Helvetica").fillColor("#aaaaaa").text("  Sin gastos ni compras registrados")
-      doc.moveDown(0.35)
-    }
-
-    drawDivider(doc, "#dddddd")
-
-    // Pagos a empleados
-    doc.fontSize(13).font("Helvetica-Bold").fillColor("#000000").text("Sueldos pagados del día")
-    doc.moveDown(0.4)
-    const totalPagosEmpleados = summary.totalPagosEmpleados ?? 0
-    const sueldosEfectivo     = summary.sueldosEfectivo ?? 0
-    if (totalPagosEmpleados > 0) {
-      drawRow(doc, "Total sueldos (descontados)", col(totalPagosEmpleados), "#8e44ad")
-      drawRow(doc, "   En efectivo (de la caja)", col(sueldosEfectivo))
-      drawRow(doc, "   Por Nequi o Bancolombia",  col(Math.max(totalPagosEmpleados - sueldosEfectivo, 0)))
-    } else {
-      doc.fontSize(11).font("Helvetica").fillColor("#aaaaaa").text("  Sin sueldos registrados")
-      doc.moveDown(0.35)
-    }
-
-    drawDivider(doc, "#dddddd")
-
-    // Propinas: no son ingreso del restaurante
-    doc.fontSize(13).font("Helvetica-Bold").fillColor("#000000").text("Propinas (no cuentan como ingreso)")
-    doc.moveDown(0.4)
-    const propCobradas   = summary.totalPropinas ?? 0
-    const propEntregadas = summary.propinasEntregadas ?? 0
-    drawRow(doc, "Cobradas",     col(propCobradas), "#27ae60")
-    drawRow(doc, "Entregadas",   col(propEntregadas))
-    if (propEntregadas > 0) {
-      drawRow(doc, "   En efectivo (de la caja)", col(summary.propinasEntregadasEfectivo ?? 0))
-    }
-    drawRow(doc, "Por entregar", col(Math.max(propCobradas - propEntregadas, 0)), "#27ae60", true)
-
-    drawDivider(doc, "#dddddd")
-
-    // Resumen neto
-    doc.fontSize(13).font("Helvetica-Bold").fillColor("#000000").text("Resumen neto")
-    doc.moveDown(0.4)
-    const ventasBrutas = summary.efectivo + summary.bancolombia + summary.nequi
-    drawRow(doc, "Ventas brutas",          col(ventasBrutas))
-    if (baseCajaPDF > 0) {
-      drawRow(doc, "Base de caja",         `+ ${col(baseCajaPDF)}`, "#3498db")
-    }
-    drawRow(doc, "Gastos",                 `- ${col(totalGastos)}`, "#e74c3c")
-    drawRow(doc, "Compras",                `- ${col(totalCompras)}`, "#e74c3c")
-    drawRow(doc, "Sueldos",                `- ${col(totalPagosEmpleados)}`, "#8e44ad")
-    drawRow(doc, "Neto del día",           col(summary.totalIngresos), "#27ae60", true)
-
-    drawDivider(doc, "#dddddd")
-
-    drawCashClose(doc, {
-      base: baseCajaPDF,
-      efectivo: summary.efectivo,
-      compras: summary.comprasEfectivo ?? 0,
-      gastos: summary.gastosEfectivo ?? 0,
-      sueldos: sueldosEfectivo,
-    })
-
-    drawFooter(doc)
+    drawDailyClosePdf(doc, summary, restaurant)
     doc.end()
   } catch (error) {
     console.error(error)
@@ -240,6 +259,7 @@ export const downloadSummaryPDF = async (req: Request, res: Response) => {
     const totalIngresos       = summaries.reduce((s, d) => s + d.totalIngresos, 0)
     const totalOrdenes        = summaries.reduce((s, d) => s + d.totalOrdenes, 0)
     const totalEfectivo       = summaries.reduce((s, d) => s + d.efectivo, 0)
+    const totalDatafono       = summaries.reduce((s, d) => s + d.datafono, 0)
     const totalBancolombia    = summaries.reduce((s, d) => s + d.bancolombia, 0)
     const totalComprasEf      = summaries.reduce((s, d) => s + (d.comprasEfectivo ?? 0), 0)
     const totalGastosEf       = summaries.reduce((s, d) => s + (d.gastosEfectivo ?? 0), 0)
@@ -250,13 +270,14 @@ export const downloadSummaryPDF = async (req: Request, res: Response) => {
     const totalPagosEmpleados = summaries.reduce((s, d) => s + (d.totalPagosEmpleados ?? 0), 0)
     const totalSueldosEf      = summaries.reduce((s, d) => s + (d.sueldosEfectivo ?? 0), 0)
     const totalBase           = summaries.reduce((s, d) => s + (d.baseCaja ?? 0), 0)
-    const ventasBrutas        = totalEfectivo + totalBancolombia + totalNequi
+    const ventasBrutas        = totalEfectivo + totalDatafono + totalBancolombia + totalNequi
 
     doc.fontSize(13).font("Helvetica-Bold").fillColor("#000000").text("Resumen general")
     doc.moveDown(0.4)
     drawRow(doc, "Días cerrados",          `${summaries.length}`)
     drawRow(doc, "Total órdenes",          `${totalOrdenes}`)
     drawRow(doc, "Efectivo",               col(totalEfectivo))
+    drawRow(doc, "Datafono",               col(totalDatafono))
     drawRow(doc, "Bancolombia",            col(totalBancolombia))
     drawRow(doc, "Nequi",                  col(totalNequi))
     drawRow(doc, "Ventas brutas",          col(ventasBrutas))
@@ -283,7 +304,7 @@ export const downloadSummaryPDF = async (req: Request, res: Response) => {
       const comprasDia  = summary.totalCompras ?? 0
       const pagosDia    = summary.totalPagosEmpleados ?? 0
       const baseCajaDia = summary.baseCaja ?? 0
-      const ventasDia   = summary.efectivo + summary.bancolombia + summary.nequi
+      const ventasDia   = summary.efectivo + summary.datafono + summary.bancolombia + summary.nequi
       const cajaDia     = cashInBox({
         base: baseCajaDia,
         efectivo: summary.efectivo,
@@ -295,7 +316,7 @@ export const downloadSummaryPDF = async (req: Request, res: Response) => {
       doc.fontSize(11).font("Helvetica-Bold").fillColor("#e67e22").text(fmtDate(summary.date))
       doc.fontSize(10).font("Helvetica").fillColor("#333333")
         .text(`  Ventas: ${col(ventasDia)}   |   Órdenes: ${summary.totalOrdenes}   |   Platos: ${summary.totalPlatos}`)
-      doc.text(`  Efectivo: ${col(summary.efectivo)}   |   Bancolombia: ${col(summary.bancolombia)}   |   Nequi: ${col(summary.nequi)}`)
+      doc.text(`  Efectivo: ${col(summary.efectivo)}   |   Datafono: ${col(summary.datafono)}   |   Bancolombia: ${col(summary.bancolombia)}   |   Nequi: ${col(summary.nequi)}`)
       doc.text(`  Efectivo en caja: ${col(cajaDia)}`)
       doc.fillColor("#27ae60").text(`  Propinas: ${col(summary.totalPropinas ?? 0)}`)
       if (baseCajaDia > 0) doc.fillColor("#3498db").text(`  Base de caja: ${col(baseCajaDia)}`)

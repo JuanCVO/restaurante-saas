@@ -163,6 +163,8 @@ model DailySummary {
   totalPlatos     Int
   efectivo        Float    @default(0)
   bancolombia     Float    @default(0)
+  // tarjeta débito/crédito en datáfono físico; distinto de Bancolombia (transferencia/QR)
+  datafono        Float    @default(0)
   nequi           Float    @default(0)
   totalPropinas       Float    @default(0)
   totalGastos         Float    @default(0)

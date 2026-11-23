@@ -11,9 +11,9 @@ import { endSession, isSessionExpired, setSession, tokenExpiresAt, useCurrentUse
 import { hasFeature } from "@/lib/tenant"
 import type { Feature, TenantConfig } from "@/types/api"
 
-const ADMIN_ONLY = ["/dashboard", "/inventory", "/purchases", "/employees"]
+const ADMIN_ONLY = ["/dashboard", "/inventory", "/purchases", "/employees", "/settings"]
 // pantallas que existen solo si el plan del restaurante incluye la funcionalidad
-const FEATURE_ROUTES: Record<string, Feature> = { "/purchases": "cash_management" }
+const FEATURE_ROUTES: Record<string, Feature> = { "/purchases": "cash_management", "/settings": "pdf_reports" }
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const router   = useRouter()

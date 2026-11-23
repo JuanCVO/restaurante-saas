@@ -41,8 +41,8 @@ type ConfirmState = {
   onConfirm: () => Promise<void> | void
 }
 
-const PAYMENT_METHODS = ["Efectivo", "Nequi", "Bancolombia", "Mixto"] as const
-const TRANSFER_METHODS = ["Nequi", "Bancolombia"] as const
+const PAYMENT_METHODS = ["Efectivo", "Datafono", "Nequi", "Bancolombia", "Mixto"] as const
+const TRANSFER_METHODS = ["Datafono", "Nequi", "Bancolombia"] as const
 const TIP_PRESETS = [0, 2000, 5000, 10000]
 
 export default function TablesPage() {
@@ -744,7 +744,7 @@ export default function TablesPage() {
                 <div className="mt-5 flex flex-col gap-4">
                   <div>
                     <h3 className="mb-2 font-display text-base font-bold">Método de pago</h3>
-                    <div className="grid grid-cols-2 gap-2">
+                    <div className="grid grid-cols-3 gap-2">
                       {paymentMethods.map(method => (
                         <button
                           key={method}
@@ -774,10 +774,10 @@ export default function TablesPage() {
                           />
                         </label>
                         <div className="flex items-center justify-between text-[15px]">
-                          <span className="text-soft">El resto, por transferencia</span>
+                          <span className="text-soft">El resto, por el otro medio</span>
                           <span className="font-bold tnum">{cop(transferPart)}</span>
                         </div>
-                        <div className="grid grid-cols-2 gap-2">
+                        <div className="grid grid-cols-3 gap-2">
                           {transferMethods.map(method => (
                             <button
                               key={method}

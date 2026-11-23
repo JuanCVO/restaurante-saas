@@ -25,9 +25,10 @@ test("las excepciones mal formadas se ignoran y no activan nada por accidente", 
   assert.deepEqual(parseFlags("texto"), {})
 })
 
-test("la configuración vacía toma los valores de siempre: propina del 10 % y todos los medios de pago", () => {
+test("la configuración vacía toma los valores de siempre: propina del 10 %, todos los medios de pago y sin correo", () => {
   assert.equal(DEFAULT_SETTINGS.tipPercent, 10)
   assert.deepEqual(DEFAULT_SETTINGS.paymentMethods, [...PAYMENT_METHODS])
+  assert.equal(DEFAULT_SETTINGS.bossEmail, null)
   assert.deepEqual(parseSettings({}), DEFAULT_SETTINGS)
   assert.deepEqual(parseSettings(null), DEFAULT_SETTINGS)
 })
@@ -35,6 +36,23 @@ test("la configuración vacía toma los valores de siempre: propina del 10 % y t
 test("una configuración guardada que ya no es válida cae a los valores por defecto en vez de romper", () => {
   assert.deepEqual(parseSettings({ tipPercent: 500 }), DEFAULT_SETTINGS)
   assert.deepEqual(parseSettings({ paymentMethods: [] }), DEFAULT_SETTINGS)
+  assert.deepEqual(parseSettings({ bossEmail: "no-es-un-correo" }), DEFAULT_SETTINGS)
+})
+
+test("el correo del jefe se guarda en minúsculas y sin espacios; vacío significa que no se manda a nadie", () => {
+  const conMayusculas = mergeSettings(DEFAULT_SETTINGS, { bossEmail: "  Jefe@Restaurante.com  " })
+  assert.ok(conMayusculas.success)
+  assert.equal(conMayusculas.data.bossEmail, "jefe@restaurante.com")
+
+  const vacio = mergeSettings(DEFAULT_SETTINGS, { bossEmail: "" })
+  assert.ok(vacio.success)
+  assert.equal(vacio.data.bossEmail, null)
+
+  const explicitamenteNulo = mergeSettings(DEFAULT_SETTINGS, { bossEmail: null })
+  assert.ok(explicitamenteNulo.success)
+  assert.equal(explicitamenteNulo.data.bossEmail, null)
+
+  assert.equal(SettingsPatchSchema.safeParse({ bossEmail: "no-es-un-correo" }).success, false)
 })
 
 test("se puede cambiar un campo y los demás se conservan", () => {

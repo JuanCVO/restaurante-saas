@@ -1,4 +1,4 @@
-export type PaymentBuckets = { efectivo: number; nequi: number; bancolombia: number }
+export type PaymentBuckets = { efectivo: number; datafono: number; nequi: number; bancolombia: number }
 
 export type PaidOrder = {
   total: number
@@ -7,16 +7,21 @@ export type PaidOrder = {
   transferMethod: string | null
 }
 
-// Reparte lo que pagó una orden entre efectivo, Nequi y Bancolombia. En un pago mixto, lo que no fue
-// en efectivo fue transferencia por el medio que se haya elegido. La propina no entra: va aparte.
-export const splitPayment = (order: PaidOrder): PaymentBuckets => {
-  const out: PaymentBuckets = { efectivo: 0, nequi: 0, bancolombia: 0 }
+const EMPTY: PaymentBuckets = { efectivo: 0, datafono: 0, nequi: 0, bancolombia: 0 }
 
+// Reparte lo que pagó una orden entre efectivo, Datafono, Nequi y Bancolombia. En un pago mixto, lo que no
+// fue en efectivo fue por el medio que se haya elegido. La propina no entra: va aparte.
+export const splitPayment = (order: PaidOrder): PaymentBuckets => {
+  const out: PaymentBuckets = { ...EMPTY }
+
+  // Antes de oct/2026 "Datafono" era el nombre de lo que hoy es Bancolombia, y por un tiempo el esquema de
+  // validación solo aceptó Bancolombia: ninguna orden sin cerrar de esa época pudo quedar guardada como
+  // "Datafono". Por eso aquí "Datafono" solo puede significar el medio de pago nuevo, no el viejo.
   const put = (method: string | null, amount: number) => {
     if (method === "Efectivo") out.efectivo += amount
+    else if (method === "Datafono") out.datafono += amount
     else if (method === "Nequi") out.nequi += amount
-    // "Datafono" era el nombre anterior de Bancolombia; las órdenes viejas lo conservan
-    else if (method === "Bancolombia" || method === "Datafono") out.bancolombia += amount
+    else if (method === "Bancolombia") out.bancolombia += amount
   }
 
   if (order.paymentMethod === "Mixto") {
@@ -32,5 +37,10 @@ export const splitPayment = (order: PaidOrder): PaymentBuckets => {
 export const sumPayments = (orders: PaidOrder[]): PaymentBuckets =>
   orders.reduce((acc, o) => {
     const p = splitPayment(o)
-    return { efectivo: acc.efectivo + p.efectivo, nequi: acc.nequi + p.nequi, bancolombia: acc.bancolombia + p.bancolombia }
-  }, { efectivo: 0, nequi: 0, bancolombia: 0 })
+    return {
+      efectivo: acc.efectivo + p.efectivo,
+      datafono: acc.datafono + p.datafono,
+      nequi: acc.nequi + p.nequi,
+      bancolombia: acc.bancolombia + p.bancolombia,
+    }
+  }, { ...EMPTY })

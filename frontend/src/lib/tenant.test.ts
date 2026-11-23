@@ -24,7 +24,7 @@ test("con plan, solo están las funcionalidades que trae", () => {
 test("la configuración del restaurante manda sobre los valores por defecto", () => {
   const user: CurrentUser = {
     ...base,
-    tenant: { plan: "PRO", features: [], settings: { tipPercent: 0, paymentMethods: ["Efectivo"] } },
+    tenant: { plan: "PRO", features: [], settings: { tipPercent: 0, paymentMethods: ["Efectivo"], bossEmail: null } },
   }
   assert.equal(tenantSettings(user).tipPercent, 0)
   assert.deepEqual(tenantSettings(user).paymentMethods, ["Efectivo"])

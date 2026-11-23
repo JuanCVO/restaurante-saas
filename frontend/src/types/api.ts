@@ -3,11 +3,13 @@ export type Role = "ADMIN" | "EMPLOYEE"
 // Funcionalidades que un plan puede incluir; las decide el servidor (backend/src/lib/entitlements.ts)
 export type Feature = "cash_management" | "pdf_reports"
 
-export type PaymentMethod = "Efectivo" | "Nequi" | "Bancolombia" | "Mixto"
+export type PaymentMethod = "Efectivo" | "Datafono" | "Nequi" | "Bancolombia" | "Mixto"
 
 export type TenantSettings = {
   tipPercent: number
   paymentMethods: PaymentMethod[]
+  /** correo al que se manda el PDF del cierre del día; null si no se manda a nadie */
+  bossEmail: string | null
 }
 
 // Plan, funcionalidades y configuración del restaurante, como los devuelve el servidor
@@ -113,7 +115,7 @@ export type EmployeePayment = {
   restaurantId: string
   salary: number
   tip: number
-  /** "Efectivo" sale de la caja; "Nequi" o "Bancolombia" es transferencia */
+  /** "Efectivo" sale de la caja; "Datafono", "Nequi" o "Bancolombia" no */
   paymentMethod: string
   notes: string | null
   createdAt: string
@@ -150,6 +152,7 @@ export type DailySummary = {
   propinasEntregadasEfectivo?: number
   baseCaja: number
   efectivo: number
+  datafono: number
   bancolombia: number
   nequi: number
   restaurantId: string
@@ -165,6 +168,7 @@ export type SummaryChart = {
   propinas: number
   baseCaja: number
   efectivo: number
+  datafono: number
   bancolombia: number
   nequi: number
 }
