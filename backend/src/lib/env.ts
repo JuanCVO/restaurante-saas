@@ -24,9 +24,10 @@ export const env = {
   corsOrigins: (process.env.CORS_ORIGINS ?? "").split(",").map(o => o.trim()).filter(Boolean),
   // si no se define, no se borra nada
   archiveRetentionDays: process.env.ARCHIVE_RETENTION_DAYS ? Number(process.env.ARCHIVE_RETENTION_DAYS) : null,
-  // correo de Gmail desde el que se manda el cierre del día, con su contraseña de aplicación (no la normal)
-  // sin estas dos, el correo del cierre simplemente no se manda (se avisa una vez en el log)
-  gmailUser: process.env.GMAIL_USER || null,
-  gmailAppPassword: process.env.GMAIL_APP_PASSWORD || null,
+  // Brevo (HTTP, no SMTP: Render bloquea SMTP en el plan gratis). Sin estas dos, el correo del
+  // cierre simplemente no se manda (se avisa una vez en el log). brevoSenderEmail debe ser el
+  // correo que verificaste como remitente en Brevo.
+  brevoApiKey: process.env.BREVO_API_KEY || null,
+  brevoSenderEmail: process.env.BREVO_SENDER_EMAIL || null,
   isProd: process.env.NODE_ENV === "production",
 }
